@@ -1,0 +1,739 @@
+#!/usr/bin/env python3
+"""
+Phosh Icon Manager for Flick
+
+Manages app icons and .desktop files for phosh integration.
+- Flick apps get their own icons and .desktop files
+- "Other apps" (normal system apps) can be hidden/shown
+- Creates a unified mobile Linux look
+"""
+
+import os
+import sys
+import json
+import shutil
+import argparse
+from pathlib import Path
+from configparser import ConfigParser
+
+# Configuration
+HOME = Path(os.environ.get('HOME', '/home/furios'))
+FLICK_PHOSH_DIR = HOME / 'flick-phosh'
+ICONS_DIR = FLICK_PHOSH_DIR / 'icons'
+FLICK_ICONS_DIR = ICONS_DIR / 'flick'
+OTHER_ICONS_DIR = ICONS_DIR / 'other-apps'
+APPS_DIR = FLICK_PHOSH_DIR / 'apps'
+
+# XDG directories
+XDG_DATA_HOME = Path(os.environ.get('XDG_DATA_HOME', HOME / '.local/share'))
+XDG_APPLICATIONS = XDG_DATA_HOME / 'applications'
+XDG_ICONS = XDG_DATA_HOME / 'icons' / 'hicolor'
+
+# System locations
+SYSTEM_APPLICATIONS = Path('/usr/share/applications')
+SYSTEM_ICONS = Path('/usr/share/icons')
+
+# State file for hidden apps
+STATE_DIR = HOME / '.local/state/flick-phosh'
+HIDDEN_APPS_FILE = STATE_DIR / 'hidden_apps.json'
+
+
+def ensure_dirs():
+    """Ensure all required directories exist."""
+    for d in [FLICK_ICONS_DIR, OTHER_ICONS_DIR, APPS_DIR,
+              XDG_APPLICATIONS, STATE_DIR]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    # Create icon size directories
+    for size in ['48x48', '64x64', '128x128', '256x256', 'scalable']:
+        subdir = 'apps' if size != 'scalable' else 'apps'
+        (XDG_ICONS / size / subdir).mkdir(parents=True, exist_ok=True)
+
+
+def load_hidden_apps():
+    """Load list of hidden apps."""
+    if HIDDEN_APPS_FILE.exists():
+        try:
+            with open(HIDDEN_APPS_FILE) as f:
+                return set(json.load(f))
+        except:
+            pass
+    return set()
+
+
+def save_hidden_apps(hidden):
+    """Save list of hidden apps."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(HIDDEN_APPS_FILE, 'w') as f:
+        json.dump(list(hidden), f, indent=2)
+
+
+def get_all_desktop_files():
+    """Get all .desktop files from system and user locations."""
+    desktop_files = {}
+
+    # System apps
+    if SYSTEM_APPLICATIONS.exists():
+        for f in SYSTEM_APPLICATIONS.glob('*.desktop'):
+            desktop_files[f.stem] = f
+
+    # User apps (override system)
+    if XDG_APPLICATIONS.exists():
+        for f in XDG_APPLICATIONS.glob('*.desktop'):
+            desktop_files[f.stem] = f
+
+    return desktop_files
+
+
+def parse_desktop_file(path):
+    """Parse a .desktop file and return its properties."""
+    try:
+        # Use a custom parser that handles duplicates
+        result = {
+            'name': '',
+            'exec': '',
+            'icon': '',
+            'type': '',
+            'categories': '',
+            'no_display': False,
+            'hidden': False,
+            'path': path,
+        }
+
+        with open(path, 'r', errors='ignore') as f:
+            in_desktop_entry = False
+            for line in f:
+                line = line.strip()
+                if line == '[Desktop Entry]':
+                    in_desktop_entry = True
+                    continue
+                elif line.startswith('[') and line.endswith(']'):
+                    in_desktop_entry = False
+                    continue
+
+                if in_desktop_entry and '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+
+                    if key == 'name' and not result['name']:
+                        result['name'] = value
+                    elif key == 'exec' and not result['exec']:
+                        result['exec'] = value
+                    elif key == 'icon' and not result['icon']:
+                        result['icon'] = value
+                    elif key == 'type' and not result['type']:
+                        result['type'] = value
+                    elif key == 'categories' and not result['categories']:
+                        result['categories'] = value
+                    elif key == 'nodisplay':
+                        result['no_display'] = value.lower() == 'true'
+                    elif key == 'hidden':
+                        result['hidden'] = value.lower() == 'true'
+
+        return result if result['name'] or result['exec'] else None
+    except Exception:
+        return None
+
+
+def create_desktop_file(app_id, name, exec_cmd, icon, categories='', folder='Flick'):
+    """Create a .desktop file for a Flick app."""
+    # Add folder as a keyword and custom category for organization
+    content = f"""[Desktop Entry]
+Type=Application
+Name={name}
+Exec={exec_cmd}
+Icon={icon}
+Categories={categories};X-Flick;
+Keywords={folder};flick;
+Terminal=false
+StartupNotify=true
+X-Flick-App=true
+X-Flick-Folder={folder}
+"""
+
+    dest = XDG_APPLICATIONS / f'flick-{app_id}.desktop'
+    with open(dest, 'w') as f:
+        f.write(content)
+
+    # Make executable
+    dest.chmod(0o755)
+    return dest
+
+
+def hide_app(app_id):
+    """Hide an app from phosh by creating an override .desktop file."""
+    desktop_files = get_all_desktop_files()
+
+    if app_id not in desktop_files:
+        print(f"App not found: {app_id}")
+        return False
+
+    # Create override file with NoDisplay=true
+    override_path = XDG_APPLICATIONS / f'{app_id}.desktop'
+
+    # Copy original and add NoDisplay
+    original = desktop_files[app_id]
+    config = ConfigParser(interpolation=None)
+    config.read(original)
+
+    if 'Desktop Entry' not in config:
+        config['Desktop Entry'] = {}
+
+    config['Desktop Entry']['NoDisplay'] = 'true'
+    config['Desktop Entry']['X-Flick-Hidden'] = 'true'
+
+    with open(override_path, 'w') as f:
+        config.write(f)
+
+    # Track in our state
+    hidden = load_hidden_apps()
+    hidden.add(app_id)
+    save_hidden_apps(hidden)
+
+    print(f"Hidden: {app_id}")
+    return True
+
+
+def show_app(app_id):
+    """Show a previously hidden app."""
+    hidden = load_hidden_apps()
+
+    if app_id not in hidden:
+        print(f"App not hidden: {app_id}")
+        return False
+
+    # Remove override file if it exists
+    override_path = XDG_APPLICATIONS / f'{app_id}.desktop'
+    if override_path.exists():
+        # Check if it's our override (has X-Flick-Hidden)
+        config = ConfigParser(interpolation=None)
+        config.read(override_path)
+        if config.get('Desktop Entry', 'X-Flick-Hidden', fallback='') == 'true':
+            override_path.unlink()
+
+    hidden.discard(app_id)
+    save_hidden_apps(hidden)
+
+    print(f"Shown: {app_id}")
+    return True
+
+
+def install_icon(icon_path, app_id):
+    """Install an icon for an app to XDG icon directories."""
+    icon_path = Path(icon_path)
+
+    if not icon_path.exists():
+        print(f"Icon not found: {icon_path}")
+        return None
+
+    ext = icon_path.suffix.lower()
+
+    if ext == '.svg':
+        # Scalable icon
+        dest_dir = XDG_ICONS / 'scalable/apps'
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f'{app_id}.svg'
+        shutil.copy2(icon_path, dest)
+    else:
+        # Raster icon - install to appropriate size dirs
+        from PIL import Image
+        img = Image.open(icon_path)
+        width, height = img.size
+
+        # Determine best size bucket
+        sizes = [48, 64, 128, 256]
+        for size in sizes:
+            if width >= size or size == sizes[-1]:
+                dest_dir = XDG_ICONS / f'{size}x{size}/apps'
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest = dest_dir / f'{app_id}.png'
+
+                # Resize if needed
+                if width != size:
+                    img_resized = img.resize((size, size), Image.LANCZOS)
+                    img_resized.save(dest, 'PNG')
+                else:
+                    shutil.copy2(icon_path, dest)
+
+    return app_id
+
+
+def copy_icon_simple(icon_path, app_id):
+    """Simple icon copy without PIL dependency."""
+    icon_path = Path(icon_path)
+
+    if not icon_path.exists():
+        print(f"Icon not found: {icon_path}")
+        return None
+
+    ext = icon_path.suffix.lower()
+
+    if ext == '.svg':
+        dest_dir = XDG_ICONS / 'scalable/apps'
+    else:
+        # Default to 128x128 for PNGs
+        dest_dir = XDG_ICONS / '128x128/apps'
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f'{app_id}{ext}'
+    shutil.copy2(icon_path, dest)
+
+    return app_id
+
+
+def sync_flick_apps():
+    """Sync Flick apps to phosh by creating .desktop files."""
+    ensure_dirs()
+
+    # Get Flick apps from the Flick repo
+    flick_apps_dir = FLICK_PHOSH_DIR / 'Flick/apps'
+    flick_icons_dir = FLICK_PHOSH_DIR / 'Flick/icons'
+
+    if not flick_apps_dir.exists():
+        print("Flick apps directory not found")
+        return
+
+    count = 0
+    # Skip shell-specific apps and ones we'll use phosh's versions for
+    skip_apps = {
+        'lockscreen', 'shared', 'welcome', 'settings',  # Shell-specific
+        'phone', 'messages', 'contacts',                 # Use phosh Calls/Chatty/Contacts
+        'web', 'terminal', 'email',                      # Use Firefox, Console, Geary
+    }
+
+    for app_dir in flick_apps_dir.iterdir():
+        if not app_dir.is_dir() or app_dir.name.startswith('.'):
+            continue
+
+        app_id = app_dir.name
+        if app_id in skip_apps:
+            continue
+
+        # Load manifest if exists
+        manifest_path = app_dir / 'manifest.json'
+        manifest = {}
+        if manifest_path.exists():
+            try:
+                with open(manifest_path) as f:
+                    manifest = json.load(f)
+            except:
+                pass
+
+        name = manifest.get('name', app_id.replace('-', ' ').replace('_', ' ').title())
+
+        # Determine exec command - prefer run script, fallback to launcher
+        launcher_script = FLICK_PHOSH_DIR / 'scripts/flick-app-launcher'
+        if (app_dir / f'run_{app_id}.sh').exists():
+            exec_cmd = f'sh {app_dir}/run_{app_id}.sh'
+        elif (app_dir / 'app/main.qml').exists() or (app_dir / 'main.qml').exists():
+            exec_cmd = f'{launcher_script} {app_id} {app_dir}'
+        else:
+            continue
+
+        # Find icon
+        icon_name = f'flick-{app_id}'
+        icon_installed = False
+
+        # Check various icon locations
+        icon_locations = [
+            flick_icons_dir / f'{app_id}.svg',
+            flick_icons_dir / f'{app_id}.png',
+            flick_icons_dir / 'apps' / f'{app_id}.svg',
+            flick_icons_dir / 'apps' / f'{app_id}.png',
+            app_dir / 'icon.png',
+            app_dir / 'icon.svg',
+        ]
+
+        for icon_path in icon_locations:
+            if icon_path.exists():
+                result = copy_icon_simple(icon_path, icon_name)
+                if result:
+                    icon_installed = True
+                    break
+
+        if not icon_installed:
+            icon_name = 'application-x-executable'  # Fallback icon
+
+        # Create .desktop file - ensure categories is proper format
+        raw_categories = manifest.get('categories', 'Utility')
+        if isinstance(raw_categories, list):
+            categories = ';'.join(raw_categories)
+        else:
+            categories = str(raw_categories).strip("[]'\"").replace("', '", ";").replace("','", ";")
+        create_desktop_file(app_id, name, exec_cmd, icon_name, categories)
+        count += 1
+        print(f"  Synced: {name} ({app_id})")
+
+    # Also create the "Other Apps" folder entry
+    other_apps_dir = FLICK_PHOSH_DIR / 'apps/other-apps'
+    if other_apps_dir.exists():
+        other_apps_exec = f'sh {other_apps_dir}/run_other-apps.sh'
+        other_apps_icon = 'flick-other-apps'
+
+        # Copy icon if not already installed
+        icon_src = FLICK_PHOSH_DIR / 'icons/flick/other-apps.svg'
+        icon_dst = XDG_ICONS / 'scalable/apps/flick-other-apps.svg'
+        if icon_src.exists():
+            icon_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(icon_src, icon_dst)
+
+        create_desktop_file('other-apps', 'Other Apps', other_apps_exec, other_apps_icon, 'Utility', 'Flick')
+        count += 1
+        print(f"  Synced: Other Apps (folder)")
+
+    print(f"\nSynced {count} Flick apps to phosh")
+
+
+def get_curated_other_apps():
+    """Get list of curated 'other apps' to show alongside Flick apps."""
+    curated_file = STATE_DIR / 'curated_other_apps.json'
+    if curated_file.exists():
+        try:
+            with open(curated_file) as f:
+                return set(json.load(f))
+        except:
+            pass
+    return set()
+
+
+def save_curated_other_apps(apps):
+    """Save curated other apps list."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    curated_file = STATE_DIR / 'curated_other_apps.json'
+    with open(curated_file, 'w') as f:
+        json.dump(list(apps), f, indent=2)
+
+
+def cmd_list(args):
+    """List all apps and their visibility status."""
+    desktop_files = get_all_desktop_files()
+    hidden = load_hidden_apps()
+    curated = get_curated_other_apps()
+
+    flick_apps = []
+    android_apps = []
+    system_apps = []
+
+    for app_id, path in sorted(desktop_files.items()):
+        info = parse_desktop_file(path)
+        if not info:
+            continue
+
+        is_hidden = app_id in hidden or info['no_display'] or info['hidden']
+        is_flick = 'X-Flick-App' in open(path).read() if path.exists() else False
+        is_android = app_id.startswith('android.')
+        is_curated = app_id in curated
+
+        entry = {
+            'id': app_id,
+            'name': info['name'],
+            'hidden': is_hidden,
+            'icon': info['icon'],
+            'curated': is_curated,
+        }
+
+        if is_flick or app_id.startswith('flick-'):
+            flick_apps.append(entry)
+        elif is_android:
+            android_apps.append(entry)
+        else:
+            system_apps.append(entry)
+
+    print("\n=== Flick Apps ===")
+    for app in flick_apps:
+        status = '[hidden]' if app['hidden'] else '[visible]'
+        print(f"  {app['id']:35} {app['name'][:25]:25} {status}")
+
+    print("\n=== Curated Other Apps ===")
+    all_other = android_apps + system_apps
+    curated_apps = [a for a in all_other if a['curated']]
+    if curated_apps:
+        for app in curated_apps:
+            status = '[hidden]' if app['hidden'] else '[visible]'
+            print(f"  {app['id']:35} {app['name'][:25]:25} {status}")
+    else:
+        print("  (none - use 'phosh-icon-manager curate <app_id>' to add)")
+
+    if args.all:
+        print("\n=== Android Apps ===")
+        for app in android_apps:
+            status = '[hidden]' if app['hidden'] else '[visible]'
+            cur = '[curated]' if app['curated'] else ''
+            print(f"  {app['id']:35} {app['name'][:25]:25} {status} {cur}")
+
+        print("\n=== System Apps ===")
+        for app in system_apps:
+            status = '[hidden]' if app['hidden'] else '[visible]'
+            cur = '[curated]' if app['curated'] else ''
+            print(f"  {app['id']:35} {app['name'][:25]:25} {status} {cur}")
+
+    print()
+
+
+def cmd_hide(args):
+    """Hide an app."""
+    for app_id in args.apps:
+        hide_app(app_id)
+
+
+def cmd_show(args):
+    """Show a hidden app."""
+    for app_id in args.apps:
+        show_app(app_id)
+
+
+def cmd_sync(args):
+    """Sync Flick apps to phosh."""
+    print("Syncing Flick apps to phosh...")
+    sync_flick_apps()
+
+
+def cmd_refresh(args):
+    """Refresh phosh app grid."""
+    # Update desktop database
+    os.system('update-desktop-database ~/.local/share/applications 2>/dev/null')
+    # Notify phosh (if running)
+    os.system('busctl --user call sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0 SetVisible b false 2>/dev/null')
+    print("Refreshed. You may need to restart phosh to see changes.")
+
+
+def cmd_curate(args):
+    """Add app(s) to curated other-apps list."""
+    curated = get_curated_other_apps()
+    desktop_files = get_all_desktop_files()
+
+    for app_id in args.apps:
+        if app_id not in desktop_files:
+            print(f"App not found: {app_id}")
+            continue
+
+        curated.add(app_id)
+        print(f"Curated: {app_id}")
+
+    save_curated_other_apps(curated)
+    print(f"\nTotal curated other apps: {len(curated)}")
+
+
+def cmd_uncurate(args):
+    """Remove app(s) from curated other-apps list."""
+    curated = get_curated_other_apps()
+
+    for app_id in args.apps:
+        if app_id not in curated:
+            print(f"Not curated: {app_id}")
+            continue
+
+        curated.discard(app_id)
+        print(f"Uncurated: {app_id}")
+
+    save_curated_other_apps(curated)
+
+
+def cmd_apply_curation(args):
+    """Apply curation: create phosh folder for Other Apps, hide clutter."""
+    desktop_files = get_all_desktop_files()
+    curated = get_curated_other_apps()
+    hidden = load_hidden_apps()
+
+    # Remove flick-other-apps.desktop (we use native phosh folder now)
+    other_apps_desktop = XDG_APPLICATIONS / 'flick-other-apps.desktop'
+    if other_apps_desktop.exists():
+        other_apps_desktop.unlink()
+        print("Removed QML Other Apps launcher (using native phosh folder)")
+
+    # Create the phosh "Other Apps" folder with curated apps
+    if curated:
+        folder_id = create_phosh_folder('Other Apps', list(curated))
+        print(f"Created/updated phosh folder 'Other Apps' with {len(curated)} apps")
+
+    hidden_count = 0
+
+    for app_id, path in desktop_files.items():
+        # Skip Flick apps - they're always visible on main grid
+        if app_id.startswith('flick-'):
+            continue
+
+        # Skip curated apps - they go in the folder, not hidden
+        if app_id in curated:
+            # Make sure they're NOT hidden (show them so folder can access them)
+            if app_id in hidden:
+                show_app(app_id)
+            continue
+
+        # Hide other non-Flick apps
+        if app_id not in hidden:
+            info = parse_desktop_file(path)
+            if info and not info['no_display'] and not info['hidden']:
+                # Skip GNOME settings panels - they're used by gnome-control-center
+                if app_id.startswith('gnome-') and app_id.endswith('-panel'):
+                    continue
+                hide_app(app_id)
+                hidden_count += 1
+
+    print(f"\nApplied curation:")
+    print(f"  Hidden from main grid: {hidden_count}")
+    print(f"  Apps in 'Other Apps' folder: {len(curated)}")
+    print("\nRun 'phosh-icon-manager refresh' to update phosh.")
+
+
+def create_phosh_folder(folder_name, app_ids):
+    """Create a phosh app folder using gsettings."""
+    import subprocess
+    import uuid
+
+    # Generate a unique folder ID
+    folder_id = str(uuid.uuid4())
+
+    # Get current folder children
+    try:
+        result = subprocess.run(
+            ['gsettings', 'get', 'org.gnome.desktop.app-folders', 'folder-children'],
+            capture_output=True, text=True
+        )
+        current = result.stdout.strip()
+        if current == '@as []':
+            folders = []
+        else:
+            # Parse the list
+            folders = [f.strip().strip("'") for f in current.strip('[]').split(',') if f.strip()]
+    except:
+        folders = []
+
+    # Check if folder with this name already exists
+    for existing_id in folders:
+        try:
+            result = subprocess.run(
+                ['gsettings', 'get', f'org.gnome.desktop.app-folders.folder:/org/gnome/desktop/app-folders/folders/{existing_id}/', 'name'],
+                capture_output=True, text=True
+            )
+            if result.stdout.strip().strip("'") == folder_name:
+                folder_id = existing_id
+                break
+        except:
+            pass
+    else:
+        # Add new folder to children
+        folders.append(folder_id)
+        folder_list = "['" + "', '".join(folders) + "']"
+        subprocess.run(['gsettings', 'set', 'org.gnome.desktop.app-folders', 'folder-children', folder_list])
+
+    # Set folder name
+    subprocess.run([
+        'gsettings', 'set',
+        f'org.gnome.desktop.app-folders.folder:/org/gnome/desktop/app-folders/folders/{folder_id}/',
+        'name', folder_name
+    ])
+
+    # Set folder apps (must have .desktop suffix)
+    apps_with_suffix = [f"{app}.desktop" if not app.endswith('.desktop') else app for app in app_ids]
+    apps_list = "['" + "', '".join(apps_with_suffix) + "']"
+    subprocess.run([
+        'gsettings', 'set',
+        f'org.gnome.desktop.app-folders.folder:/org/gnome/desktop/app-folders/folders/{folder_id}/',
+        'apps', apps_list
+    ])
+
+    return folder_id
+
+
+def cmd_organize(args):
+    """Organize apps into folders by creating folder .desktop entries."""
+    print("Organizing apps into folders...")
+
+    # Create folder markers (these show as section headers in some launchers)
+    folders_dir = STATE_DIR / 'folders'
+    folders_dir.mkdir(parents=True, exist_ok=True)
+
+    # Get app counts
+    desktop_files = get_all_desktop_files()
+    curated = get_curated_other_apps()
+
+    flick_apps = [f for f in desktop_files if f.startswith('flick-')]
+    other_apps = [f for f in curated if f in desktop_files]
+
+    print(f"\nApp Organization:")
+    print(f"  Flick Apps ({len(flick_apps)}):")
+    for app_id in sorted(flick_apps):
+        info = parse_desktop_file(desktop_files[app_id])
+        name = info['name'] if info else app_id
+        print(f"    - {name}")
+
+    print(f"\n  Other Apps ({len(other_apps)}):")
+    for app_id in sorted(other_apps):
+        info = parse_desktop_file(desktop_files[app_id])
+        name = info['name'] if info else app_id
+        print(f"    - {name}")
+
+    # Write folder config for reference
+    config = {
+        'flick': sorted(flick_apps),
+        'other': sorted(other_apps),
+    }
+    with open(folders_dir / 'folders.json', 'w') as f:
+        json.dump(config, f, indent=2)
+
+    print(f"\nFolder config saved to {folders_dir / 'folders.json'}")
+    print("\nNote: Phosh doesn't support native folders, but apps are organized by:")
+    print("  - X-Flick category (all Flick apps)")
+    print("  - Keywords field (searchable)")
+    print("  - Curated list (other apps to show)")
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Phosh Icon Manager for Flick')
+    subparsers = parser.add_subparsers(dest='command')
+
+    # list command
+    p = subparsers.add_parser('list', help='List apps')
+    p.add_argument('-a', '--all', action='store_true', help='Show all apps including system')
+    p.set_defaults(func=cmd_list)
+
+    # hide command
+    p = subparsers.add_parser('hide', help='Hide app(s) from phosh')
+    p.add_argument('apps', nargs='+', help='App ID(s) to hide')
+    p.set_defaults(func=cmd_hide)
+
+    # show command
+    p = subparsers.add_parser('show', help='Show hidden app(s)')
+    p.add_argument('apps', nargs='+', help='App ID(s) to show')
+    p.set_defaults(func=cmd_show)
+
+    # sync command
+    p = subparsers.add_parser('sync', help='Sync Flick apps to phosh')
+    p.set_defaults(func=cmd_sync)
+
+    # refresh command
+    p = subparsers.add_parser('refresh', help='Refresh phosh app grid')
+    p.set_defaults(func=cmd_refresh)
+
+    # curate command
+    p = subparsers.add_parser('curate', help='Add app(s) to curated other-apps list')
+    p.add_argument('apps', nargs='+', help='App ID(s) to curate')
+    p.set_defaults(func=cmd_curate)
+
+    # uncurate command
+    p = subparsers.add_parser('uncurate', help='Remove app(s) from curated other-apps list')
+    p.add_argument('apps', nargs='+', help='App ID(s) to uncurate')
+    p.set_defaults(func=cmd_uncurate)
+
+    # apply-curation command
+    p = subparsers.add_parser('apply-curation', help='Apply curation: show curated, hide rest')
+    p.set_defaults(func=cmd_apply_curation)
+
+    # organize command
+    p = subparsers.add_parser('organize', help='Show app organization (Flick vs Other)')
+    p.set_defaults(func=cmd_organize)
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        return 0
+
+    ensure_dirs()
+    return args.func(args)
+
+
+if __name__ == '__main__':
+    sys.exit(main() or 0)

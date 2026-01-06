@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="folderGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#5c7cfa;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#4263eb;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Folder back -->
+  <path d="M4 12 L4 40 Q4 42 6 42 L42 42 Q44 42 44 40 L44 16 Q44 14 42 14 L22 14 L18 10 Q17 9 16 9 L6 9 Q4 9 4 11 Z" fill="url(#folderGrad)"/>
+  <!-- Folder front -->
+  <path d="M4 18 L44 18 L44 40 Q44 42 42 42 L6 42 Q4 42 4 40 Z" fill="#748ffc" opacity="0.5"/>
+  <!-- App dots -->
+  <circle cx="16" cy="28" r="3" fill="white" opacity="0.9"/>
+  <circle cx="24" cy="28" r="3" fill="white" opacity="0.9"/>
+  <circle cx="32" cy="28" r="3" fill="white" opacity="0.9"/>
+  <circle cx="16" cy="36" r="3" fill="white" opacity="0.6"/>
+  <circle cx="24" cy="36" r="3" fill="white" opacity="0.6"/>
+</svg>
