@@ -70,6 +70,11 @@ echo "Setting up Other Apps folder..."
 # Refresh
 ./scripts/phosh-icon-manager refresh
 
+# Install effects overlay
+echo ""
+echo "Installing Flick Effects overlay..."
+./shader-overlay/install-effects
+
 echo ""
 echo "================================"
 echo "  Installation Complete!"

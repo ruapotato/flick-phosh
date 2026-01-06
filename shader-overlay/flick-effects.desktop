@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Flick Effects
+Comment=Visual effects overlay for Phosh
+Exec=flick-effects
+Icon=preferences-desktop-effects
+Terminal=false
+Type=Application
+Categories=Utility;Settings;
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

@@ -1,0 +1,472 @@
+#!/usr/bin/env python3
+"""
+Flick Effects Overlay for Phosh
+
+Creates a transparent overlay layer that renders GPU shader effects:
+- Touch ripples (water, snow, CRT, ASCII)
+- Living pixels (stars, fireflies, dust, shimmer)
+
+Uses GTK Layer Shell to create an overlay on top of phosh.
+"""
+
+import gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('Gdk', '3.0')
+gi.require_version('GtkLayerShell', '0.1')
+
+from gi.repository import Gtk, Gdk, GLib, GtkLayerShell
+import cairo
+import math
+import time
+import json
+import os
+from dataclasses import dataclass
+from typing import List, Optional
+import random
+
+# Configuration
+CONFIG_PATH = os.path.expanduser("~/.local/state/flick/effects_config.json")
+DEFAULT_CONFIG = {
+    "touch_effect_style": 0,  # 0=water, 1=snow, 2=crt, 3=terminal
+    "fisheye_size": 0.16,
+    "fisheye_strength": 0.13,
+    "ripple_size": 0.30,
+    "ripple_strength": 0.07,
+    "ripple_duration": 0.5,
+    "living_pixels": False,
+    "lp_stars": True,
+    "lp_shooting_stars": True,
+    "lp_fireflies": True,
+    "lp_dust": True,
+    "lp_shimmer": True,
+    "rain_effect_enabled": False,
+}
+
+
+@dataclass
+class TouchEffect:
+    """A single touch effect (ripple)"""
+    x: float
+    y: float
+    start_time: float
+    is_ripple: bool = False
+
+    def age(self) -> float:
+        return time.time() - self.start_time
+
+    def is_expired(self, duration: float) -> bool:
+        if self.is_ripple:
+            return self.age() > duration
+        return False
+
+
+@dataclass
+class LivingPixel:
+    """A living pixel effect (star, firefly, etc.)"""
+    x: float
+    y: float
+    pixel_type: str  # 'star', 'firefly', 'dust', 'shooting_star'
+    start_time: float
+    velocity_x: float = 0.0
+    velocity_y: float = 0.0
+    brightness: float = 1.0
+    size: float = 2.0
+
+    def age(self) -> float:
+        return time.time() - self.start_time
+
+
+class EffectsOverlay(Gtk.Window):
+    """Transparent overlay for shader effects"""
+
+    def __init__(self):
+        super().__init__(title="Flick Effects")
+
+        self.config = self.load_config()
+        self.touches: List[TouchEffect] = []
+        self.living_pixels: List[LivingPixel] = []
+        self.last_spawn_time = 0
+
+        # Set up transparent window
+        self.set_app_paintable(True)
+        screen = self.get_screen()
+        visual = screen.get_rgba_visual()
+        if visual:
+            self.set_visual(visual)
+
+        # Set up layer shell
+        GtkLayerShell.init_for_window(self)
+        GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
+        GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, True)
+        GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.BOTTOM, True)
+        GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.LEFT, True)
+        GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)
+        GtkLayerShell.set_exclusive_zone(self, -1)  # Don't reserve space
+        GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.NONE)
+
+        # Make input pass through
+        self.set_accept_focus(False)
+        self.set_can_focus(False)
+
+        # Drawing area
+        self.drawing_area = Gtk.DrawingArea()
+        self.drawing_area.connect('draw', self.on_draw)
+        self.add(self.drawing_area)
+
+        # Touch event handling via separate input region
+        self.add_events(Gdk.EventMask.TOUCH_MASK |
+                       Gdk.EventMask.BUTTON_PRESS_MASK |
+                       Gdk.EventMask.BUTTON_RELEASE_MASK)
+        self.connect('touch-event', self.on_touch)
+        self.connect('button-press-event', self.on_button_press)
+        self.connect('button-release-event', self.on_button_release)
+
+        # Animation timer (60 FPS)
+        GLib.timeout_add(16, self.on_tick)
+
+        # Config reload timer
+        GLib.timeout_add(3000, self.reload_config)
+
+        # Make window click-through
+        self.realize()
+        self.input_shape_combine_region(cairo.Region())
+
+        self.show_all()
+
+    def load_config(self) -> dict:
+        """Load effects configuration"""
+        try:
+            with open(CONFIG_PATH) as f:
+                config = json.load(f)
+                return {**DEFAULT_CONFIG, **config}
+        except:
+            return DEFAULT_CONFIG.copy()
+
+    def reload_config(self) -> bool:
+        """Reload config periodically"""
+        self.config = self.load_config()
+        return True
+
+    def on_touch(self, widget, event):
+        """Handle touch events"""
+        if event.touch.type == Gdk.EventType.TOUCH_BEGIN:
+            self.add_touch(event.touch.x, event.touch.y)
+        elif event.touch.type == Gdk.EventType.TOUCH_END:
+            self.end_touch(event.touch.x, event.touch.y)
+        return False  # Let event pass through
+
+    def on_button_press(self, widget, event):
+        """Handle mouse press (for testing)"""
+        self.add_touch(event.x, event.y)
+        return False
+
+    def on_button_release(self, widget, event):
+        """Handle mouse release"""
+        self.end_touch(event.x, event.y)
+        return False
+
+    def add_touch(self, x: float, y: float):
+        """Add a new touch effect"""
+        self.touches.append(TouchEffect(x=x, y=y, start_time=time.time()))
+
+    def end_touch(self, x: float, y: float):
+        """Convert touch to ripple"""
+        # Find closest active touch and convert to ripple
+        for touch in self.touches:
+            if not touch.is_ripple:
+                touch.is_ripple = True
+                touch.start_time = time.time()
+                touch.x = x
+                touch.y = y
+                break
+
+    def spawn_living_pixels(self, width: int, height: int):
+        """Spawn living pixel effects"""
+        if not self.config.get('living_pixels'):
+            return
+
+        now = time.time()
+        if now - self.last_spawn_time < 0.1:  # Spawn every 100ms
+            return
+        self.last_spawn_time = now
+
+        # Random chance to spawn different effects
+        if self.config.get('lp_stars') and random.random() < 0.1:
+            self.living_pixels.append(LivingPixel(
+                x=random.random() * width,
+                y=random.random() * height * 0.6,  # Upper portion
+                pixel_type='star',
+                start_time=now,
+                brightness=random.random(),
+                size=random.uniform(1, 3)
+            ))
+
+        if self.config.get('lp_shooting_stars') and random.random() < 0.01:
+            self.living_pixels.append(LivingPixel(
+                x=random.random() * width,
+                y=random.random() * height * 0.3,
+                pixel_type='shooting_star',
+                start_time=now,
+                velocity_x=random.uniform(200, 400),
+                velocity_y=random.uniform(100, 200),
+                size=2
+            ))
+
+        if self.config.get('lp_fireflies') and random.random() < 0.05:
+            self.living_pixels.append(LivingPixel(
+                x=random.random() * width,
+                y=height * 0.5 + random.random() * height * 0.5,
+                pixel_type='firefly',
+                start_time=now,
+                velocity_x=random.uniform(-20, 20),
+                velocity_y=random.uniform(-10, 10),
+                size=random.uniform(2, 4)
+            ))
+
+        if self.config.get('lp_dust') and random.random() < 0.08:
+            self.living_pixels.append(LivingPixel(
+                x=random.random() * width,
+                y=random.random() * height,
+                pixel_type='dust',
+                start_time=now,
+                velocity_x=random.uniform(-5, 5),
+                velocity_y=random.uniform(5, 15),
+                brightness=random.uniform(0.3, 0.7),
+                size=random.uniform(1, 2)
+            ))
+
+        if self.config.get('lp_shimmer') and random.random() < 0.02:
+            self.living_pixels.append(LivingPixel(
+                x=random.random() * width,
+                y=random.random() * height,
+                pixel_type='shimmer',
+                start_time=now,
+                brightness=random.random(),
+                size=random.uniform(3, 6)
+            ))
+
+    def on_tick(self) -> bool:
+        """Animation tick"""
+        # Clean up expired effects
+        duration = self.config.get('ripple_duration', 0.5)
+        self.touches = [t for t in self.touches if not t.is_expired(duration)]
+
+        # Clean up old living pixels
+        self.living_pixels = [p for p in self.living_pixels if p.age() < 5.0]
+
+        # Spawn new living pixels
+        alloc = self.get_allocation()
+        self.spawn_living_pixels(alloc.width, alloc.height)
+
+        # Trigger redraw
+        self.drawing_area.queue_draw()
+        return True
+
+    def on_draw(self, widget, cr):
+        """Draw effects"""
+        alloc = widget.get_allocation()
+        width, height = alloc.width, alloc.height
+
+        # Clear with transparent
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.paint()
+
+        cr.set_operator(cairo.OPERATOR_OVER)
+
+        # Draw ripple effects
+        style = self.config.get('touch_effect_style', 0)
+        for touch in self.touches:
+            if touch.is_ripple:
+                self.draw_ripple(cr, touch, width, height, style)
+            else:
+                self.draw_fisheye_indicator(cr, touch, width, height)
+
+        # Draw living pixels
+        self.draw_living_pixels(cr, width, height)
+
+        return False
+
+    def draw_ripple(self, cr, touch: TouchEffect, width: int, height: int, style: int):
+        """Draw a ripple effect"""
+        age = touch.age()
+        duration = self.config.get('ripple_duration', 0.5)
+        progress = min(age / duration, 1.0)
+
+        # Ease out
+        eased = 1.0 - (1.0 - progress) ** 3
+
+        max_radius = min(width, height) * self.config.get('ripple_size', 0.3)
+        radius = max_radius * eased
+
+        # Fade out
+        alpha = (1.0 - progress) ** 2 * 0.6
+
+        if style == 0:  # Water
+            # Outer ring
+            cr.set_source_rgba(0.3, 0.6, 1.0, alpha * 0.5)
+            cr.set_line_width(3)
+            cr.arc(touch.x, touch.y, radius, 0, 2 * math.pi)
+            cr.stroke()
+
+            # Inner ring
+            cr.set_source_rgba(0.5, 0.8, 1.0, alpha)
+            cr.set_line_width(2)
+            cr.arc(touch.x, touch.y, radius * 0.7, 0, 2 * math.pi)
+            cr.stroke()
+
+        elif style == 1:  # Snow
+            # Snowflake pattern
+            cr.set_source_rgba(1.0, 1.0, 1.0, alpha)
+            for i in range(6):
+                angle = i * math.pi / 3
+                x1 = touch.x + math.cos(angle) * radius * 0.3
+                y1 = touch.y + math.sin(angle) * radius * 0.3
+                x2 = touch.x + math.cos(angle) * radius
+                y2 = touch.y + math.sin(angle) * radius
+                cr.move_to(x1, y1)
+                cr.line_to(x2, y2)
+            cr.set_line_width(2)
+            cr.stroke()
+
+        elif style == 2:  # CRT
+            # Scanline effect
+            cr.set_source_rgba(0.0, 1.0, 0.3, alpha * 0.3)
+            for y in range(int(touch.y - radius), int(touch.y + radius), 4):
+                if 0 <= y < height:
+                    dx = math.sqrt(max(0, radius**2 - (y - touch.y)**2))
+                    cr.rectangle(touch.x - dx, y, dx * 2, 2)
+            cr.fill()
+
+        elif style == 3:  # Terminal/ASCII
+            # Terminal-style expanding ring with characters
+            cr.select_font_face("monospace", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+            cr.set_font_size(12)
+            chars = "01#@*+."
+            char_spacing = 14
+            num_chars = int(2 * math.pi * radius / char_spacing)
+
+            for i in range(num_chars):
+                angle = (i / num_chars) * 2 * math.pi
+                x = touch.x + math.cos(angle) * radius
+                y = touch.y + math.sin(angle) * radius
+                char = chars[i % len(chars)]
+
+                cr.set_source_rgba(0.0, 1.0, 0.0, alpha)
+                cr.move_to(x - 4, y + 4)
+                cr.show_text(char)
+
+    def draw_fisheye_indicator(self, cr, touch: TouchEffect, width: int, height: int):
+        """Draw indicator for active touch"""
+        radius = min(width, height) * self.config.get('fisheye_size', 0.16)
+
+        # Subtle glow
+        gradient = cairo.RadialGradient(touch.x, touch.y, 0, touch.x, touch.y, radius)
+        gradient.add_color_stop_rgba(0, 0.5, 0.7, 1.0, 0.2)
+        gradient.add_color_stop_rgba(0.7, 0.3, 0.5, 0.8, 0.1)
+        gradient.add_color_stop_rgba(1, 0, 0, 0, 0)
+
+        cr.set_source(gradient)
+        cr.arc(touch.x, touch.y, radius, 0, 2 * math.pi)
+        cr.fill()
+
+    def draw_living_pixels(self, cr, width: int, height: int):
+        """Draw living pixel effects"""
+        now = time.time()
+
+        for pixel in self.living_pixels:
+            age = pixel.age()
+
+            # Update position for moving pixels
+            if pixel.pixel_type in ('shooting_star', 'firefly', 'dust'):
+                pixel.x += pixel.velocity_x * 0.016  # 60 FPS
+                pixel.y += pixel.velocity_y * 0.016
+
+            if pixel.pixel_type == 'star':
+                # Twinkling star
+                twinkle = 0.5 + 0.5 * math.sin(age * 5 + pixel.brightness * 10)
+                alpha = twinkle * 0.8
+                cr.set_source_rgba(1.0, 1.0, 0.9, alpha)
+                cr.arc(pixel.x, pixel.y, pixel.size, 0, 2 * math.pi)
+                cr.fill()
+
+            elif pixel.pixel_type == 'shooting_star':
+                # Shooting star with trail
+                alpha = max(0, 1.0 - age * 0.5)
+                for i in range(5):
+                    trail_alpha = alpha * (1 - i * 0.2)
+                    trail_x = pixel.x - pixel.velocity_x * 0.016 * i * 2
+                    trail_y = pixel.y - pixel.velocity_y * 0.016 * i * 2
+                    cr.set_source_rgba(1.0, 1.0, 0.8, trail_alpha)
+                    cr.arc(trail_x, trail_y, pixel.size * (1 - i * 0.15), 0, 2 * math.pi)
+                    cr.fill()
+
+            elif pixel.pixel_type == 'firefly':
+                # Glowing firefly
+                glow = 0.5 + 0.5 * math.sin(age * 3)
+                alpha = glow * 0.9 * max(0, 1 - age * 0.2)
+
+                # Glow
+                gradient = cairo.RadialGradient(pixel.x, pixel.y, 0, pixel.x, pixel.y, pixel.size * 3)
+                gradient.add_color_stop_rgba(0, 0.8, 1.0, 0.3, alpha)
+                gradient.add_color_stop_rgba(1, 0.5, 0.8, 0.2, 0)
+                cr.set_source(gradient)
+                cr.arc(pixel.x, pixel.y, pixel.size * 3, 0, 2 * math.pi)
+                cr.fill()
+
+                # Core
+                cr.set_source_rgba(1.0, 1.0, 0.5, alpha)
+                cr.arc(pixel.x, pixel.y, pixel.size, 0, 2 * math.pi)
+                cr.fill()
+
+            elif pixel.pixel_type == 'dust':
+                # Floating dust particle
+                alpha = pixel.brightness * max(0, 1 - age * 0.25)
+                cr.set_source_rgba(0.9, 0.85, 0.75, alpha * 0.6)
+                cr.arc(pixel.x, pixel.y, pixel.size, 0, 2 * math.pi)
+                cr.fill()
+
+            elif pixel.pixel_type == 'shimmer':
+                # Sparkling shimmer effect
+                sparkle = abs(math.sin(age * 8 + pixel.brightness * 20))
+                alpha = sparkle * max(0, 1 - age * 0.3)
+
+                if sparkle > 0.7:
+                    # Draw cross sparkle
+                    cr.set_source_rgba(1.0, 1.0, 1.0, alpha)
+                    cr.set_line_width(1)
+                    # Horizontal line
+                    cr.move_to(pixel.x - pixel.size, pixel.y)
+                    cr.line_to(pixel.x + pixel.size, pixel.y)
+                    # Vertical line
+                    cr.move_to(pixel.x, pixel.y - pixel.size)
+                    cr.line_to(pixel.x, pixel.y + pixel.size)
+                    cr.stroke()
+
+                    # Center dot
+                    cr.arc(pixel.x, pixel.y, 1.5, 0, 2 * math.pi)
+                    cr.fill()
+
+
+def main():
+    """Main entry point"""
+    # Check if running on Wayland
+    if not os.environ.get('WAYLAND_DISPLAY'):
+        print("Error: Flick Effects requires Wayland")
+        return 1
+
+    print("Starting Flick Effects overlay...")
+
+    overlay = EffectsOverlay()
+    overlay.connect('destroy', Gtk.main_quit)
+
+    try:
+        Gtk.main()
+    except KeyboardInterrupt:
+        pass
+
+    return 0
+
+
+if __name__ == '__main__':
+    exit(main())

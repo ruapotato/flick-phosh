@@ -1,0 +1,68 @@
+#!/bin/bash
+# Install Flick Effects Overlay
+# Provides visual effects (ripples, living pixels) on top of phosh
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+echo "Installing Flick Effects overlay..."
+
+# Install the main script
+mkdir -p "$HOME/.local/bin"
+cp "$SCRIPT_DIR/flick-effects" "$HOME/.local/bin/"
+chmod +x "$HOME/.local/bin/flick-effects"
+echo "  Installed flick-effects to ~/.local/bin/"
+
+# Install systemd service
+mkdir -p "$HOME/.config/systemd/user"
+cp "$SCRIPT_DIR/flick-effects.service" "$HOME/.config/systemd/user/"
+echo "  Installed systemd service"
+
+# Install autostart desktop file
+mkdir -p "$HOME/.config/autostart"
+cp "$SCRIPT_DIR/flick-effects.desktop" "$HOME/.config/autostart/"
+echo "  Installed autostart entry"
+
+# Create default config if not exists
+CONFIG_DIR="$HOME/.local/state/flick"
+CONFIG_FILE="$CONFIG_DIR/effects_config.json"
+mkdir -p "$CONFIG_DIR"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    cat > "$CONFIG_FILE" << 'EOF'
+{
+    "touch_effect_style": 0,
+    "fisheye_size": 0.16,
+    "fisheye_strength": 0.13,
+    "ripple_size": 0.30,
+    "ripple_strength": 0.07,
+    "ripple_duration": 0.5,
+    "living_pixels": false,
+    "lp_stars": true,
+    "lp_shooting_stars": true,
+    "lp_fireflies": true,
+    "lp_dust": true,
+    "lp_shimmer": true,
+    "rain_effect_enabled": false
+}
+EOF
+    echo "  Created default effects config"
+fi
+
+# Reload systemd
+systemctl --user daemon-reload
+
+echo ""
+echo "Flick Effects installed!"
+echo ""
+echo "To enable effects on startup:"
+echo "  systemctl --user enable flick-effects"
+echo ""
+echo "To start effects now:"
+echo "  systemctl --user start flick-effects"
+echo ""
+echo "To stop effects:"
+echo "  systemctl --user stop flick-effects"
+echo ""
+echo "Edit config: $CONFIG_FILE"

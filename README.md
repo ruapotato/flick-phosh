@@ -129,11 +129,61 @@ App state is stored in `~/.local/state/flick-phosh/`:
 - `hidden_apps.json` - Manually hidden apps
 - `folders/` - Folder configuration
 
+## Flick Effects Overlay
+
+The Flick Effects overlay adds visual effects on top of phosh:
+
+### Touch Effects
+- **Water ripples** - Blue concentric rings on touch release
+- **Snow** - Snowflake patterns
+- **CRT** - Retro scanline effect
+- **Terminal** - ASCII character rings
+
+### Living Pixels
+- **Stars** - Twinkling stars in the sky
+- **Shooting stars** - Occasional meteors with trails
+- **Fireflies** - Glowing particles that drift
+- **Dust** - Floating dust motes
+- **Shimmer** - Sparkling points
+
+### Managing Effects
+
+```bash
+# Enable effects on startup
+systemctl --user enable flick-effects
+
+# Start/stop effects
+systemctl --user start flick-effects
+systemctl --user stop flick-effects
+
+# Edit configuration
+nano ~/.local/state/flick/effects_config.json
+```
+
+### Configuration Options
+
+Edit `~/.local/state/flick/effects_config.json`:
+
+```json
+{
+    "touch_effect_style": 0,    // 0=water, 1=snow, 2=crt, 3=terminal
+    "ripple_size": 0.30,        // Size relative to screen
+    "ripple_duration": 0.5,     // Seconds
+    "living_pixels": false,     // Enable/disable all living pixels
+    "lp_stars": true,
+    "lp_shooting_stars": true,
+    "lp_fireflies": true,
+    "lp_dust": true,
+    "lp_shimmer": true
+}
+```
+
 ## Requirements
 
 - Phosh shell
 - Qt5 with QML support (`qmlscene`)
 - Python 3
+- GTK Layer Shell (`libgtk-layer-shell-dev`)
 
 ## Roadmap
 
