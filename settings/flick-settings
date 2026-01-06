@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""
+Flick Settings - Configure Flick effects overlay
+Integrates with GNOME Settings via GSettings
+"""
+
+import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+
+from gi.repository import Gtk, Adw, Gio, GLib
+import json
+import os
+
+CONFIG_PATH = os.path.expanduser("~/.local/state/flick/effects_config.json")
+
+
+class FlickSettingsWindow(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Flick Effects")
+        self.set_default_size(360, 600)
+
+        self.config = self.load_config()
+
+        # Main layout
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.set_content(box)
+
+        # Header bar
+        header = Adw.HeaderBar()
+        box.append(header)
+
+        # Scrollable content
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+        box.append(scroll)
+
+        # Preferences page
+        prefs = Adw.PreferencesPage()
+        scroll.set_child(prefs)
+
+        # Touch Effects Group
+        touch_group = Adw.PreferencesGroup(title="Touch Effects")
+        prefs.add(touch_group)
+
+        # Enable touch effects
+        touch_enable = Adw.SwitchRow(title="Enable Touch Effects",
+                                      subtitle="Show ripples when touching screen")
+        touch_enable.set_active(self.config.get('touch_effects_enabled', True))
+        touch_enable.connect('notify::active', self.on_touch_enable_changed)
+        touch_group.add(touch_enable)
+
+        # Touch effect style
+        style_row = Adw.ComboRow(title="Effect Style")
+        style_model = Gtk.StringList.new(["Water Ripples", "Snowflakes", "CRT Scanlines", "Terminal ASCII"])
+        style_row.set_model(style_model)
+        style_row.set_selected(self.config.get('touch_effect_style', 3))
+        style_row.connect('notify::selected', self.on_style_changed)
+        touch_group.add(style_row)
+
+        # Ripple size
+        size_row = Adw.ActionRow(title="Ripple Size")
+        size_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.1, 0.5, 0.05)
+        size_scale.set_value(self.config.get('ripple_size', 0.3))
+        size_scale.set_hexpand(True)
+        size_scale.set_valign(Gtk.Align.CENTER)
+        size_scale.connect('value-changed', self.on_ripple_size_changed)
+        size_row.add_suffix(size_scale)
+        touch_group.add(size_row)
+
+        # Living Pixels Group
+        pixels_group = Adw.PreferencesGroup(title="Living Pixels")
+        prefs.add(pixels_group)
+
+        # Enable living pixels
+        pixels_enable = Adw.SwitchRow(title="Enable Living Pixels",
+                                       subtitle="Ambient effects like stars and fireflies")
+        pixels_enable.set_active(self.config.get('living_pixels', True))
+        pixels_enable.connect('notify::active', self.on_pixels_enable_changed)
+        pixels_group.add(pixels_enable)
+
+        # Individual effects
+        effects = [
+            ('lp_stars', 'Stars', 'Twinkling stars in the sky'),
+            ('lp_shooting_stars', 'Shooting Stars', 'Occasional meteors'),
+            ('lp_fireflies', 'Fireflies', 'Glowing particles that drift'),
+            ('lp_dust', 'Dust', 'Floating dust motes'),
+            ('lp_shimmer', 'Shimmer', 'Sparkling points'),
+        ]
+
+        for key, title, subtitle in effects:
+            row = Adw.SwitchRow(title=title, subtitle=subtitle)
+            row.set_active(self.config.get(key, True))
+            row.connect('notify::active', self.on_effect_toggled, key)
+            pixels_group.add(row)
+
+        # Service control group
+        service_group = Adw.PreferencesGroup(title="Service")
+        prefs.add(service_group)
+
+        # Start on boot
+        autostart_row = Adw.SwitchRow(title="Start on Login",
+                                       subtitle="Run effects automatically")
+        autostart_row.set_active(self.is_service_enabled())
+        autostart_row.connect('notify::active', self.on_autostart_changed)
+        service_group.add(autostart_row)
+
+        # Restart button
+        restart_row = Adw.ActionRow(title="Restart Effects",
+                                     subtitle="Apply changes immediately")
+        restart_btn = Gtk.Button(label="Restart")
+        restart_btn.set_valign(Gtk.Align.CENTER)
+        restart_btn.add_css_class("suggested-action")
+        restart_btn.connect('clicked', self.on_restart_clicked)
+        restart_row.add_suffix(restart_btn)
+        service_group.add(restart_row)
+
+    def load_config(self):
+        try:
+            with open(CONFIG_PATH) as f:
+                return json.load(f)
+        except:
+            return {}
+
+    def save_config(self):
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        with open(CONFIG_PATH, 'w') as f:
+            json.dump(self.config, f, indent=2)
+
+    def is_service_enabled(self):
+        import subprocess
+        result = subprocess.run(['systemctl', '--user', 'is-enabled', 'flick-effects'],
+                                capture_output=True, text=True)
+        return result.returncode == 0
+
+    def on_touch_enable_changed(self, row, param):
+        self.config['touch_effects_enabled'] = row.get_active()
+        self.save_config()
+
+    def on_style_changed(self, row, param):
+        self.config['touch_effect_style'] = row.get_selected()
+        self.save_config()
+
+    def on_ripple_size_changed(self, scale):
+        self.config['ripple_size'] = scale.get_value()
+        self.save_config()
+
+    def on_pixels_enable_changed(self, row, param):
+        self.config['living_pixels'] = row.get_active()
+        self.save_config()
+
+    def on_effect_toggled(self, row, param, key):
+        self.config[key] = row.get_active()
+        self.save_config()
+
+    def on_autostart_changed(self, row, param):
+        import subprocess
+        if row.get_active():
+            subprocess.run(['systemctl', '--user', 'enable', 'flick-effects'])
+        else:
+            subprocess.run(['systemctl', '--user', 'disable', 'flick-effects'])
+
+    def on_restart_clicked(self, btn):
+        import subprocess
+        subprocess.run(['systemctl', '--user', 'restart', 'flick-effects'])
+
+
+class FlickSettingsApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id='org.flick.Settings')
+
+    def do_activate(self):
+        win = FlickSettingsWindow(self)
+        win.present()
+
+
+def main():
+    app = FlickSettingsApp()
+    return app.run(None)
+
+
+if __name__ == '__main__':
+    main()

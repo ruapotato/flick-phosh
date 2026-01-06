@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Flick Effects
+Comment=Configure visual effects
+Exec=flick-settings
+Icon=preferences-desktop-effects
+Terminal=false
+Type=Application
+Categories=Settings;DesktopSettings;
+Keywords=effects;visual;ripple;stars;

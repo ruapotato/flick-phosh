@@ -234,31 +234,62 @@ class EffectsOverlay(Gtk.Window):
                                 alloc = self.get_allocation()
                                 sx = (x / self.touch_max_x) * alloc.width
                                 sy = (y / self.touch_max_y) * alloc.height
-                                GLib.idle_add(self.on_evdev_touch_end, sx, sy)
+                                GLib.idle_add(self.on_evdev_touch_end, current_slot, sx, sy)
                                 del slot_tracking[current_slot]
                         else:
                             # Touch started
                             slot_tracking[current_slot] = event.value
-                            x = slot_x.get(current_slot, 0)
-                            y = slot_y.get(current_slot, 0)
+                    elif event.code == ecodes.ABS_MT_POSITION_X:
+                        slot_x[current_slot] = event.value
+                        # Update position while dragging
+                        if current_slot in slot_tracking:
+                            alloc = self.get_allocation()
+                            sx = (slot_x[current_slot] / self.touch_max_x) * alloc.width
+                            sy = (slot_y.get(current_slot, 0) / self.touch_max_y) * alloc.height
+                            GLib.idle_add(self.on_evdev_touch_move, current_slot, sx, sy)
+                    elif event.code == ecodes.ABS_MT_POSITION_Y:
+                        slot_y[current_slot] = event.value
+                        # Update position while dragging
+                        if current_slot in slot_tracking:
+                            alloc = self.get_allocation()
+                            sx = (slot_x.get(current_slot, 0) / self.touch_max_x) * alloc.width
+                            sy = (slot_y[current_slot] / self.touch_max_y) * alloc.height
+                            GLib.idle_add(self.on_evdev_touch_move, current_slot, sx, sy)
+
+                elif event.type == ecodes.EV_SYN and event.code == ecodes.SYN_REPORT:
+                    # Sync event - check for new touches
+                    for slot, tracking_id in slot_tracking.items():
+                        if slot not in self.active_touches:
+                            x = slot_x.get(slot, 0)
+                            y = slot_y.get(slot, 0)
                             alloc = self.get_allocation()
                             sx = (x / self.touch_max_x) * alloc.width
                             sy = (y / self.touch_max_y) * alloc.height
-                            GLib.idle_add(self.on_evdev_touch_start, sx, sy)
-                    elif event.code == ecodes.ABS_MT_POSITION_X:
-                        slot_x[current_slot] = event.value
-                    elif event.code == ecodes.ABS_MT_POSITION_Y:
-                        slot_y[current_slot] = event.value
+                            GLib.idle_add(self.on_evdev_touch_start, slot, sx, sy)
         except Exception as e:
             print(f"Touch monitor error: {e}")
 
-    def on_evdev_touch_start(self, x, y):
+    def on_evdev_touch_start(self, slot, x, y):
         """Handle touch start from evdev (called in main thread)"""
+        self.active_touches[slot] = (x, y)
         self.add_touch(x, y)
         return False
 
-    def on_evdev_touch_end(self, x, y):
+    def on_evdev_touch_move(self, slot, x, y):
+        """Handle touch move from evdev (called in main thread)"""
+        self.active_touches[slot] = (x, y)
+        # Update the active touch position
+        for touch in self.touches:
+            if not touch.is_ripple:
+                touch.x = x
+                touch.y = y
+                break
+        return False
+
+    def on_evdev_touch_end(self, slot, x, y):
         """Handle touch end from evdev (called in main thread)"""
+        if slot in self.active_touches:
+            del self.active_touches[slot]
         self.end_touch(x, y)
         return False
 
@@ -474,18 +505,49 @@ class EffectsOverlay(Gtk.Window):
                 cr.show_text(char)
 
     def draw_fisheye_indicator(self, cr, touch: TouchEffect, width: int, height: int):
-        """Draw indicator for active touch"""
+        """Draw indicator for active touch - simulates fisheye distortion"""
         radius = min(width, height) * self.config.get('fisheye_size', 0.16)
+        strength = self.config.get('fisheye_strength', 0.13)
 
-        # Subtle glow
-        gradient = cairo.RadialGradient(touch.x, touch.y, 0, touch.x, touch.y, radius)
-        gradient.add_color_stop_rgba(0, 0.5, 0.7, 1.0, 0.2)
-        gradient.add_color_stop_rgba(0.7, 0.3, 0.5, 0.8, 0.1)
-        gradient.add_color_stop_rgba(1, 0, 0, 0, 0)
+        # Pulsing effect
+        pulse = 0.8 + 0.2 * math.sin(touch.age() * 4)
 
+        # Outer distortion ring (cyan/blue)
+        gradient = cairo.RadialGradient(touch.x, touch.y, radius * 0.7, touch.x, touch.y, radius)
+        gradient.add_color_stop_rgba(0, 0.2, 0.8, 1.0, 0.0)
+        gradient.add_color_stop_rgba(0.5, 0.3, 0.7, 1.0, 0.4 * pulse)
+        gradient.add_color_stop_rgba(1, 0.1, 0.5, 0.8, 0.0)
         cr.set_source(gradient)
         cr.arc(touch.x, touch.y, radius, 0, 2 * math.pi)
         cr.fill()
+
+        # Inner glow (bright center)
+        inner_gradient = cairo.RadialGradient(touch.x, touch.y, 0, touch.x, touch.y, radius * 0.5)
+        inner_gradient.add_color_stop_rgba(0, 1.0, 1.0, 1.0, 0.3 * pulse)
+        inner_gradient.add_color_stop_rgba(0.3, 0.6, 0.9, 1.0, 0.2 * pulse)
+        inner_gradient.add_color_stop_rgba(1, 0.3, 0.6, 0.9, 0.0)
+        cr.set_source(inner_gradient)
+        cr.arc(touch.x, touch.y, radius * 0.5, 0, 2 * math.pi)
+        cr.fill()
+
+        # Concentric rings to simulate lens distortion
+        cr.set_line_width(1.5)
+        for i in range(3):
+            ring_radius = radius * (0.3 + i * 0.25)
+            alpha = (0.3 - i * 0.08) * pulse
+            cr.set_source_rgba(0.4, 0.8, 1.0, alpha)
+            cr.arc(touch.x, touch.y, ring_radius, 0, 2 * math.pi)
+            cr.stroke()
+
+        # Crosshair in center
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.5 * pulse)
+        cr.set_line_width(1)
+        line_len = radius * 0.15
+        cr.move_to(touch.x - line_len, touch.y)
+        cr.line_to(touch.x + line_len, touch.y)
+        cr.move_to(touch.x, touch.y - line_len)
+        cr.line_to(touch.x, touch.y + line_len)
+        cr.stroke()
 
     def draw_living_pixels(self, cr, width: int, height: int):
         """Draw living pixel effects"""
