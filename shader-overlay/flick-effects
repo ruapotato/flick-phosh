@@ -21,8 +21,18 @@ import time
 import json
 import os
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Dict
 import random
+import threading
+
+# Try to import evdev for touch monitoring
+try:
+    import evdev
+    from evdev import ecodes
+    EVDEV_AVAILABLE = True
+except ImportError:
+    EVDEV_AVAILABLE = False
+    print("Warning: python3-evdev not available, touch effects disabled")
 
 # Configuration
 CONFIG_PATH = os.path.expanduser("~/.local/state/flick/effects_config.json")
@@ -86,6 +96,11 @@ class EffectsOverlay(Gtk.Window):
         self.touches: List[TouchEffect] = []
         self.living_pixels: List[LivingPixel] = []
         self.last_spawn_time = 0
+        self.screen_width = 1080  # Will be updated
+        self.screen_height = 2340
+        self.active_touches: Dict[int, tuple] = {}  # slot -> (x, y)
+        self.touch_monitor_thread = None
+        self.running = True
 
         # Set up transparent window
         self.set_app_paintable(True)
@@ -133,6 +148,10 @@ class EffectsOverlay(Gtk.Window):
 
         self.show_all()
 
+        # Start evdev touch monitoring
+        if EVDEV_AVAILABLE:
+            self.start_touch_monitor()
+
     def load_config(self) -> dict:
         """Load effects configuration"""
         try:
@@ -146,6 +165,102 @@ class EffectsOverlay(Gtk.Window):
         """Reload config periodically"""
         self.config = self.load_config()
         return True
+
+    def find_touchscreen(self):
+        """Find the touchscreen input device"""
+        for path in evdev.list_devices():
+            try:
+                dev = evdev.InputDevice(path)
+                caps = dev.capabilities()
+                # Look for multitouch absolute axes
+                if ecodes.EV_ABS in caps:
+                    abs_caps = caps[ecodes.EV_ABS]
+                    has_mt_x = any(c[0] == ecodes.ABS_MT_POSITION_X for c in abs_caps)
+                    has_mt_y = any(c[0] == ecodes.ABS_MT_POSITION_Y for c in abs_caps)
+                    if has_mt_x and has_mt_y:
+                        return dev, abs_caps
+            except:
+                pass
+        return None, None
+
+    def start_touch_monitor(self):
+        """Start the touch monitoring thread"""
+        dev, abs_caps = self.find_touchscreen()
+        if not dev:
+            print("No touchscreen found")
+            return
+
+        # Get touch coordinate ranges
+        self.touch_max_x = 1080
+        self.touch_max_y = 2340
+        for code, info in abs_caps:
+            if code == ecodes.ABS_MT_POSITION_X:
+                self.touch_max_x = info.max
+            elif code == ecodes.ABS_MT_POSITION_Y:
+                self.touch_max_y = info.max
+
+        print(f"Touch device: {dev.name}")
+        print(f"Touch range: {self.touch_max_x}x{self.touch_max_y}")
+
+        self.touch_monitor_thread = threading.Thread(
+            target=self.touch_monitor_loop,
+            args=(dev,),
+            daemon=True
+        )
+        self.touch_monitor_thread.start()
+
+    def touch_monitor_loop(self, dev):
+        """Monitor touch events from evdev"""
+        current_slot = 0
+        slot_x = {}
+        slot_y = {}
+        slot_tracking = {}
+
+        try:
+            for event in dev.read_loop():
+                if not self.running:
+                    break
+
+                if event.type == ecodes.EV_ABS:
+                    if event.code == ecodes.ABS_MT_SLOT:
+                        current_slot = event.value
+                    elif event.code == ecodes.ABS_MT_TRACKING_ID:
+                        if event.value == -1:
+                            # Touch ended
+                            if current_slot in slot_tracking:
+                                x = slot_x.get(current_slot, 0)
+                                y = slot_y.get(current_slot, 0)
+                                # Scale to screen coordinates
+                                alloc = self.get_allocation()
+                                sx = (x / self.touch_max_x) * alloc.width
+                                sy = (y / self.touch_max_y) * alloc.height
+                                GLib.idle_add(self.on_evdev_touch_end, sx, sy)
+                                del slot_tracking[current_slot]
+                        else:
+                            # Touch started
+                            slot_tracking[current_slot] = event.value
+                            x = slot_x.get(current_slot, 0)
+                            y = slot_y.get(current_slot, 0)
+                            alloc = self.get_allocation()
+                            sx = (x / self.touch_max_x) * alloc.width
+                            sy = (y / self.touch_max_y) * alloc.height
+                            GLib.idle_add(self.on_evdev_touch_start, sx, sy)
+                    elif event.code == ecodes.ABS_MT_POSITION_X:
+                        slot_x[current_slot] = event.value
+                    elif event.code == ecodes.ABS_MT_POSITION_Y:
+                        slot_y[current_slot] = event.value
+        except Exception as e:
+            print(f"Touch monitor error: {e}")
+
+    def on_evdev_touch_start(self, x, y):
+        """Handle touch start from evdev (called in main thread)"""
+        self.add_touch(x, y)
+        return False
+
+    def on_evdev_touch_end(self, x, y):
+        """Handle touch end from evdev (called in main thread)"""
+        self.end_touch(x, y)
+        return False
 
     def on_touch(self, widget, event):
         """Handle touch events"""
@@ -191,7 +306,7 @@ class EffectsOverlay(Gtk.Window):
         self.last_spawn_time = now
 
         # Random chance to spawn different effects
-        if self.config.get('lp_stars') and random.random() < 0.1:
+        if self.config.get('lp_stars') and random.random() < 0.4:
             self.living_pixels.append(LivingPixel(
                 x=random.random() * width,
                 y=random.random() * height * 0.6,  # Upper portion
@@ -251,8 +366,10 @@ class EffectsOverlay(Gtk.Window):
         duration = self.config.get('ripple_duration', 0.5)
         self.touches = [t for t in self.touches if not t.is_expired(duration)]
 
-        # Clean up old living pixels
-        self.living_pixels = [p for p in self.living_pixels if p.age() < 5.0]
+        # Clean up old living pixels (stars last longer)
+        self.living_pixels = [p for p in self.living_pixels
+                              if (p.pixel_type == 'star' and p.age() < 15.0) or
+                                 (p.pixel_type != 'star' and p.age() < 5.0)]
 
         # Spawn new living pixels
         alloc = self.get_allocation()
@@ -458,7 +575,12 @@ def main():
     print("Starting Flick Effects overlay...")
 
     overlay = EffectsOverlay()
-    overlay.connect('destroy', Gtk.main_quit)
+
+    def on_destroy(widget):
+        widget.running = False
+        Gtk.main_quit()
+
+    overlay.connect('destroy', on_destroy)
 
     try:
         Gtk.main()
