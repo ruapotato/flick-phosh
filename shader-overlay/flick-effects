@@ -48,6 +48,7 @@ class ScreenReader:
         self.background_data = None  # Cached background for living pixels
         self.last_bg_capture = 0
         self.touch_region_data = {}  # Cached regions for fisheye: slot -> (cx, cy, data, w, h)
+        self.capture_in_progress = False
         self._check_grim()
 
     def _check_grim(self):
@@ -61,22 +62,30 @@ class ScreenReader:
         """Capture full screen for background brightness (called periodically)"""
         if not self.grim_available:
             return
+        if self.capture_in_progress:
+            return
+        self.capture_in_progress = True
         try:
             # Capture at lower resolution for speed
             result = subprocess.run(
-                ['grim', '-t', 'ppm', '-s', '0.25', '-'],
-                capture_output=True, timeout=1
+                ['grim', '-t', 'ppm', '-s', '0.1', '-'],
+                capture_output=True, timeout=2
             )
             if result.returncode == 0:
                 self.background_data = self._parse_ppm(result.stdout)
                 self.last_bg_capture = time.time()
-        except:
+        except Exception as e:
             pass
+        finally:
+            self.capture_in_progress = False
 
     def capture_touch_region(self, slot, cx, cy, radius):
         """Capture region around touch point for fisheye"""
         if not self.grim_available:
             return
+        if self.capture_in_progress:
+            return  # Skip if another capture is running
+        self.capture_in_progress = True
         try:
             r = int(radius)
             x = max(0, int(cx) - r)
@@ -86,7 +95,7 @@ class ScreenReader:
 
             result = subprocess.run(
                 ['grim', '-g', f'{x},{y} {w}x{h}', '-t', 'ppm', '-'],
-                capture_output=True, timeout=0.5
+                capture_output=True, timeout=1
             )
             if result.returncode == 0:
                 data, pw, ph = self._parse_ppm(result.stdout)
@@ -94,6 +103,8 @@ class ScreenReader:
                     self.touch_region_data[slot] = (cx, cy, data, pw, ph, x, y)
         except:
             pass
+        finally:
+            self.capture_in_progress = False
 
     def clear_touch_region(self, slot):
         """Clear cached touch region"""
@@ -466,13 +477,13 @@ class EffectsOverlay(Gtk.Window):
         self.last_spawn_time = now
 
         # Random chance to spawn different effects
-        # Stars only appear on dark backgrounds
+        # Stars only appear on dark backgrounds (or if no capture yet)
         if self.config.get('lp_stars') and random.random() < 0.4:
             x = random.random() * width
             y = random.random() * height * 0.6  # Upper portion
             # Check if background is dark enough for stars
             bg_brightness = self.screen_reader.get_brightness(x, y)
-            if bg_brightness < 0.3:  # Only on dark areas
+            if bg_brightness < 0.6:  # Spawn on darker areas (0.5 = default when no capture)
                 self.living_pixels.append(LivingPixel(
                     x=x,
                     y=y,
@@ -486,7 +497,7 @@ class EffectsOverlay(Gtk.Window):
             x = random.random() * width
             y = random.random() * height * 0.3
             bg_brightness = self.screen_reader.get_brightness(x, y)
-            if bg_brightness < 0.4:  # Only on darker areas
+            if bg_brightness < 0.6:  # On darker areas
                 self.living_pixels.append(LivingPixel(
                     x=x,
                     y=y,
@@ -501,7 +512,7 @@ class EffectsOverlay(Gtk.Window):
             x = random.random() * width
             y = height * 0.5 + random.random() * height * 0.5
             bg_brightness = self.screen_reader.get_brightness(x, y)
-            if bg_brightness < 0.5:  # Fireflies prefer darker areas
+            if bg_brightness < 0.7:  # Fireflies prefer darker areas
                 self.living_pixels.append(LivingPixel(
                     x=x,
                     y=y,
@@ -545,10 +556,10 @@ class EffectsOverlay(Gtk.Window):
                               if (p.pixel_type == 'star' and p.age() < 15.0) or
                                  (p.pixel_type != 'star' and p.age() < 5.0)]
 
-        # Periodic background capture for living pixels (every 2 seconds)
+        # Periodic background capture for living pixels (every 5 seconds, in thread)
         now = time.time()
-        if now - self.screen_reader.last_bg_capture > 2.0:
-            self.screen_reader.capture_background()
+        if now - self.screen_reader.last_bg_capture > 5.0 and not self.screen_reader.capture_in_progress:
+            threading.Thread(target=self.screen_reader.capture_background, daemon=True).start()
 
         # Spawn new living pixels
         alloc = self.get_allocation()
