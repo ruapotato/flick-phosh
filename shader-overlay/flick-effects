@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict
 import random
 import threading
+import shutil
+import subprocess
 
 # Try to import evdev for touch monitoring
 try:
@@ -38,71 +40,122 @@ except ImportError:
 import mmap
 import struct
 
-class FramebufferReader:
-    """Read pixels from Linux framebuffer for screen sampling"""
+class ScreenReader:
+    """Read screen pixels using grim (Wayland screenshot tool)"""
     def __init__(self):
-        self.fb = None
-        self.fb_map = None
-        self.width = 0
-        self.height = 0
-        self.bpp = 4  # bytes per pixel
-        self.stride = 0
-        self._init_framebuffer()
+        self.width = 720
+        self.height = 1600
+        self.background_data = None  # Cached background for living pixels
+        self.last_bg_capture = 0
+        self.touch_region_data = {}  # Cached regions for fisheye: slot -> (cx, cy, data, w, h)
+        self._check_grim()
 
-    def _init_framebuffer(self):
+    def _check_grim(self):
+        self.grim_available = shutil.which('grim') is not None
+        if self.grim_available:
+            print("Screen reader: using grim")
+        else:
+            print("Screen reader: grim not available")
+
+    def capture_background(self):
+        """Capture full screen for background brightness (called periodically)"""
+        if not self.grim_available:
+            return
         try:
-            # Read framebuffer properties
-            with open('/sys/class/graphics/fb0/virtual_size') as f:
-                size = f.read().strip().split(',')
-                self.width = int(size[0])
-                self.height = int(size[1])
-            with open('/sys/class/graphics/fb0/bits_per_pixel') as f:
-                self.bpp = int(f.read().strip()) // 8
-            self.stride = self.width * self.bpp
-
-            # Memory map the framebuffer
-            self.fb = open('/dev/fb0', 'rb')
-            self.fb_map = mmap.mmap(self.fb.fileno(), self.width * self.height * self.bpp,
-                                     mmap.MAP_SHARED, mmap.PROT_READ)
-            print(f"Framebuffer: {self.width}x{self.height} @ {self.bpp*8}bpp")
-        except Exception as e:
-            print(f"Framebuffer init failed: {e}")
-            self.fb_map = None
-
-    def get_pixel(self, x, y):
-        """Get pixel color at (x, y) as (r, g, b)"""
-        if not self.fb_map or x < 0 or y < 0 or x >= self.width or y >= self.height:
-            return (0, 0, 0)
-        try:
-            offset = (y * self.stride) + (x * self.bpp)
-            # BGRA format (common for framebuffers)
-            b, g, r, a = struct.unpack('BBBB', self.fb_map[offset:offset+4])
-            return (r, g, b)
+            # Capture at lower resolution for speed
+            result = subprocess.run(
+                ['grim', '-t', 'ppm', '-s', '0.25', '-'],
+                capture_output=True, timeout=1
+            )
+            if result.returncode == 0:
+                self.background_data = self._parse_ppm(result.stdout)
+                self.last_bg_capture = time.time()
         except:
-            return (0, 0, 0)
+            pass
+
+    def capture_touch_region(self, slot, cx, cy, radius):
+        """Capture region around touch point for fisheye"""
+        if not self.grim_available:
+            return
+        try:
+            r = int(radius)
+            x = max(0, int(cx) - r)
+            y = max(0, int(cy) - r)
+            w = min(r * 2, self.width - x)
+            h = min(r * 2, self.height - y)
+
+            result = subprocess.run(
+                ['grim', '-g', f'{x},{y} {w}x{h}', '-t', 'ppm', '-'],
+                capture_output=True, timeout=0.5
+            )
+            if result.returncode == 0:
+                data, pw, ph = self._parse_ppm(result.stdout)
+                if data:
+                    self.touch_region_data[slot] = (cx, cy, data, pw, ph, x, y)
+        except:
+            pass
+
+    def clear_touch_region(self, slot):
+        """Clear cached touch region"""
+        if slot in self.touch_region_data:
+            del self.touch_region_data[slot]
+
+    def _parse_ppm(self, data):
+        """Parse PPM image data, return (pixels, width, height)"""
+        try:
+            # PPM format: P6\nwidth height\nmaxval\n<binary RGB>
+            header_end = 0
+            newlines = 0
+            for i, b in enumerate(data):
+                if b == ord('\n'):
+                    newlines += 1
+                    if newlines == 3:
+                        header_end = i + 1
+                        break
+
+            header = data[:header_end].decode('ascii')
+            lines = header.strip().split('\n')
+            w, h = map(int, lines[1].split())
+            pixels = data[header_end:]
+            return (pixels, w, h)
+        except:
+            return (None, 0, 0)
 
     def get_brightness(self, x, y):
-        """Get brightness at (x, y) as 0.0-1.0"""
-        r, g, b = self.get_pixel(int(x), int(y))
-        # Perceived brightness formula
+        """Get brightness at screen position (from cached background)"""
+        if not self.background_data or not self.background_data[0]:
+            return 0.5  # Default to medium if no capture
+
+        pixels, w, h = self.background_data
+        # Scale coordinates (background is 0.25 scale)
+        sx, sy = int(x * 0.25), int(y * 0.25)
+        if sx < 0 or sy < 0 or sx >= w or sy >= h:
+            return 0.5
+
+        offset = (sy * w + sx) * 3
+        if offset + 3 > len(pixels):
+            return 0.5
+
+        r, g, b = pixels[offset], pixels[offset+1], pixels[offset+2]
         return (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
 
-    def get_region(self, cx, cy, radius):
-        """Get a circular region of pixels for distortion"""
-        pixels = []
-        r_int = int(radius)
-        for dy in range(-r_int, r_int + 1):
-            for dx in range(-r_int, r_int + 1):
-                if dx*dx + dy*dy <= radius*radius:
-                    x, y = int(cx + dx), int(cy + dy)
-                    pixels.append((dx, dy, self.get_pixel(x, y)))
-        return pixels
+    def get_touch_pixel(self, slot, dx, dy):
+        """Get pixel from cached touch region"""
+        if slot not in self.touch_region_data:
+            return None
+        cx, cy, pixels, w, h, ox, oy = self.touch_region_data[slot]
+        # dx, dy are offsets from center
+        px = w // 2 + int(dx)
+        py = h // 2 + int(dy)
+        if px < 0 or py < 0 or px >= w or py >= h:
+            return None
+        offset = (py * w + px) * 3
+        if offset + 3 > len(pixels):
+            return None
+        return (pixels[offset], pixels[offset+1], pixels[offset+2])
 
     def close(self):
-        if self.fb_map:
-            self.fb_map.close()
-        if self.fb:
-            self.fb.close()
+        pass
 
 # Configuration
 CONFIG_PATH = os.path.expanduser("~/.local/state/flick/effects_config.json")
@@ -171,7 +224,7 @@ class EffectsOverlay(Gtk.Window):
         self.active_touches: Dict[int, tuple] = {}  # slot -> (x, y)
         self.touch_monitor_thread = None
         self.running = True
-        self.fb_reader = FramebufferReader()
+        self.screen_reader = ScreenReader()
 
         # Set up transparent window
         self.set_app_paintable(True)
@@ -344,6 +397,10 @@ class EffectsOverlay(Gtk.Window):
         """Handle touch start from evdev (called in main thread)"""
         self.active_touches[slot] = (x, y)
         self.add_touch(x, y)
+        # Capture region for fisheye distortion
+        alloc = self.get_allocation()
+        radius = min(alloc.width, alloc.height) * self.config.get('fisheye_size', 0.16)
+        self.screen_reader.capture_touch_region(slot, x, y, radius)
         return False
 
     def on_evdev_touch_move(self, slot, x, y):
@@ -361,6 +418,7 @@ class EffectsOverlay(Gtk.Window):
         """Handle touch end from evdev (called in main thread)"""
         if slot in self.active_touches:
             del self.active_touches[slot]
+        self.screen_reader.clear_touch_region(slot)
         self.end_touch(x, y)
         return False
 
@@ -413,7 +471,7 @@ class EffectsOverlay(Gtk.Window):
             x = random.random() * width
             y = random.random() * height * 0.6  # Upper portion
             # Check if background is dark enough for stars
-            bg_brightness = self.fb_reader.get_brightness(x, y)
+            bg_brightness = self.screen_reader.get_brightness(x, y)
             if bg_brightness < 0.3:  # Only on dark areas
                 self.living_pixels.append(LivingPixel(
                     x=x,
@@ -427,7 +485,7 @@ class EffectsOverlay(Gtk.Window):
         if self.config.get('lp_shooting_stars') and random.random() < 0.01:
             x = random.random() * width
             y = random.random() * height * 0.3
-            bg_brightness = self.fb_reader.get_brightness(x, y)
+            bg_brightness = self.screen_reader.get_brightness(x, y)
             if bg_brightness < 0.4:  # Only on darker areas
                 self.living_pixels.append(LivingPixel(
                     x=x,
@@ -442,7 +500,7 @@ class EffectsOverlay(Gtk.Window):
         if self.config.get('lp_fireflies') and random.random() < 0.05:
             x = random.random() * width
             y = height * 0.5 + random.random() * height * 0.5
-            bg_brightness = self.fb_reader.get_brightness(x, y)
+            bg_brightness = self.screen_reader.get_brightness(x, y)
             if bg_brightness < 0.5:  # Fireflies prefer darker areas
                 self.living_pixels.append(LivingPixel(
                     x=x,
@@ -486,6 +544,11 @@ class EffectsOverlay(Gtk.Window):
         self.living_pixels = [p for p in self.living_pixels
                               if (p.pixel_type == 'star' and p.age() < 15.0) or
                                  (p.pixel_type != 'star' and p.age() < 5.0)]
+
+        # Periodic background capture for living pixels (every 2 seconds)
+        now = time.time()
+        if now - self.screen_reader.last_bg_capture > 2.0:
+            self.screen_reader.capture_background()
 
         # Spawn new living pixels
         alloc = self.get_allocation()
@@ -590,7 +653,7 @@ class EffectsOverlay(Gtk.Window):
                 cr.show_text(char)
 
     def draw_fisheye_indicator(self, cr, touch: TouchEffect, width: int, height: int):
-        """Draw fisheye distortion by reading and warping actual pixels"""
+        """Draw fisheye distortion using captured screen region"""
         radius = min(width, height) * self.config.get('fisheye_size', 0.16)
         strength = self.config.get('fisheye_strength', 0.13)
 
@@ -600,10 +663,17 @@ class EffectsOverlay(Gtk.Window):
         cx, cy = touch.x, touch.y
         r_int = int(radius)
 
-        # Draw distorted pixels from framebuffer
-        if self.fb_reader.fb_map:
-            # Sample and draw distorted pixels
-            step = 2  # Sample every 2 pixels for performance
+        # Find which slot this touch belongs to (use slot 0 as default)
+        slot = 0
+        for s, (tx, ty) in self.active_touches.items():
+            if abs(tx - cx) < 10 and abs(ty - cy) < 10:
+                slot = s
+                break
+
+        # Draw distorted pixels from captured region
+        has_pixels = slot in self.screen_reader.touch_region_data
+        if has_pixels:
+            step = 3  # Sample every 3 pixels for performance
             for dy in range(-r_int, r_int + 1, step):
                 for dx in range(-r_int, r_int + 1, step):
                     dist = math.sqrt(dx*dx + dy*dy)
@@ -613,34 +683,35 @@ class EffectsOverlay(Gtk.Window):
                     # Fisheye distortion formula
                     norm_dist = dist / radius
                     if norm_dist > 0:
-                        # Barrel distortion
+                        # Barrel distortion - pull pixels inward
                         distorted_dist = norm_dist * (1 + strength * norm_dist * norm_dist)
                         scale = distorted_dist / norm_dist
                     else:
                         scale = 1
 
-                    # Source pixel (where to sample from)
-                    src_x = int(cx + dx * scale)
-                    src_y = int(cy + dy * scale)
+                    # Source offset (where to sample from in captured region)
+                    src_dx = int(dx * scale)
+                    src_dy = int(dy * scale)
 
-                    # Get pixel color
-                    r, g, b = self.fb_reader.get_pixel(src_x, src_y)
+                    # Get pixel color from captured region
+                    pixel = self.screen_reader.get_touch_pixel(slot, src_dx, src_dy)
+                    if pixel:
+                        r, g, b = pixel
+                        # Draw at destination
+                        dest_x = cx + dx
+                        dest_y = cy + dy
 
-                    # Draw at destination
-                    dest_x = cx + dx
-                    dest_y = cy + dy
+                        # Fade at edges
+                        edge_fade = 1.0 - (norm_dist ** 2)
 
-                    # Fade at edges
-                    edge_fade = 1.0 - (norm_dist ** 2)
-
-                    cr.set_source_rgba(r/255, g/255, b/255, edge_fade * 0.9)
-                    cr.rectangle(dest_x, dest_y, step, step)
-                    cr.fill()
+                        cr.set_source_rgba(r/255, g/255, b/255, edge_fade * 0.95)
+                        cr.rectangle(dest_x, dest_y, step, step)
+                        cr.fill()
 
         # Outer glow ring
         gradient = cairo.RadialGradient(cx, cy, radius * 0.85, cx, cy, radius)
         gradient.add_color_stop_rgba(0, 0.3, 0.7, 1.0, 0.0)
-        gradient.add_color_stop_rgba(0.5, 0.3, 0.7, 1.0, 0.5 * pulse)
+        gradient.add_color_stop_rgba(0.5, 0.3, 0.7, 1.0, 0.4 * pulse)
         gradient.add_color_stop_rgba(1, 0.2, 0.5, 0.8, 0.0)
         cr.set_source(gradient)
         cr.arc(cx, cy, radius, 0, 2 * math.pi)
