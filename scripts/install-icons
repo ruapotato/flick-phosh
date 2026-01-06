@@ -1,0 +1,130 @@
+#!/bin/bash
+# Install Flick icon pack for phosh
+# Creates a proper icon theme that provides Flick-style icons
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FLICK_DIR="$SCRIPT_DIR/../Flick"
+ICONS_SRC="$FLICK_DIR/icons/apps"
+ICONS_DEST="$HOME/.local/share/icons/hicolor"
+
+echo "Installing Flick icon pack..."
+
+# Create destination directories
+mkdir -p "$ICONS_DEST/scalable/apps"
+mkdir -p "$ICONS_DEST/48x48/apps"
+mkdir -p "$ICONS_DEST/64x64/apps"
+mkdir -p "$ICONS_DEST/128x128/apps"
+mkdir -p "$ICONS_DEST/256x256/apps"
+
+# Install Flick app icons with flick- prefix
+for icon in "$ICONS_SRC"/*.svg; do
+    if [ -f "$icon" ] && [ ! -L "$icon" ]; then
+        name=$(basename "$icon" .svg)
+        cp "$icon" "$ICONS_DEST/scalable/apps/flick-$name.svg"
+    fi
+done
+
+# Also install standard icon names that apps might look for
+# This makes Flick icons show up for system apps too
+declare -A ICON_MAPPINGS=(
+    # Calculator
+    ["org.gnome.Calculator"]="calculator"
+    ["accessories-calculator"]="calculator"
+
+    # Calendar
+    ["org.gnome.Calendar"]="calendar"
+    ["x-office-calendar"]="calendar"
+
+    # Clock
+    ["org.gnome.clocks"]="clock"
+    ["preferences-system-time"]="clock"
+
+    # Files
+    ["org.gnome.Nautilus"]="files"
+    ["system-file-manager"]="files"
+
+    # Music
+    ["org.gnome.Music"]="music"
+    ["multimedia-audio-player"]="music"
+    ["audio-x-generic"]="music"
+
+    # Photos
+    ["org.gnome.Loupe"]="photos"
+    ["image-x-generic"]="photos"
+
+    # Weather
+    ["org.gnome.Weather"]="weather"
+
+    # Maps
+    ["org.gnome.Maps"]="maps"
+
+    # Contacts
+    ["org.gnome.Contacts"]="contacts"
+    ["contact-new"]="contacts"
+
+    # Terminal
+    ["org.gnome.Console"]="terminal"
+    ["utilities-terminal"]="terminal"
+
+    # Notes
+    ["org.gnome.TextEditor"]="notes"
+    ["accessories-text-editor"]="notes"
+
+    # Video
+    ["org.gnome.Totem"]="video"
+    ["video-x-generic"]="video"
+
+    # Email
+    ["org.gnome.Geary"]="email"
+    ["mail-client"]="email"
+
+    # Phone
+    ["org.gnome.Calls"]="phone"
+    ["call-start"]="phone"
+
+    # Messages
+    ["sm.puri.Chatty"]="messages"
+
+    # Camera
+    ["org.gnome.Snapshot"]="camera"
+    ["camera-photo"]="camera"
+
+    # Settings
+    ["org.gnome.Settings"]="settings"
+    ["preferences-system"]="settings"
+
+    # Recorder
+    ["org.gnome.SoundRecorder"]="recorder"
+    ["audio-input-microphone"]="recorder"
+)
+
+echo "Installing icon mappings..."
+for target in "${!ICON_MAPPINGS[@]}"; do
+    source="${ICON_MAPPINGS[$target]}"
+    if [ -f "$ICONS_SRC/$source.svg" ]; then
+        cp "$ICONS_SRC/$source.svg" "$ICONS_DEST/scalable/apps/$target.svg"
+        echo "  $target -> $source.svg"
+    fi
+done
+
+# Install store icon
+if [ -f "$FLICK_DIR/icons/store.svg" ]; then
+    cp "$FLICK_DIR/icons/store.svg" "$ICONS_DEST/scalable/apps/flick-store.svg"
+fi
+
+# Install distract icon
+if [ -f "$FLICK_DIR/icons/distract.svg" ]; then
+    cp "$FLICK_DIR/icons/distract.svg" "$ICONS_DEST/scalable/apps/flick-distract.svg"
+fi
+
+# Update icon cache
+echo "Updating icon cache..."
+gtk-update-icon-cache -f -t "$ICONS_DEST" 2>/dev/null || true
+
+echo ""
+echo "Flick icon pack installed!"
+echo "Icons installed to: $ICONS_DEST"
+echo ""
+echo "You may need to restart phosh to see icon changes."

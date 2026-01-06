@@ -365,24 +365,19 @@ def sync_flick_apps():
         count += 1
         print(f"  Synced: {name} ({app_id})")
 
-    # Also create the "Other Apps" folder entry
-    other_apps_dir = FLICK_PHOSH_DIR / 'apps/other-apps'
-    if other_apps_dir.exists():
-        other_apps_exec = f'sh {other_apps_dir}/run_other-apps.sh'
-        other_apps_icon = 'flick-other-apps'
+    # Note: "Other Apps" is handled via native phosh folders (gsettings),
+    # not a separate .desktop file. Use 'apply-curation' to set up the folder.
 
-        # Copy icon if not already installed
-        icon_src = FLICK_PHOSH_DIR / 'icons/flick/other-apps.svg'
-        icon_dst = XDG_ICONS / 'scalable/apps/flick-other-apps.svg'
-        if icon_src.exists():
-            icon_dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(icon_src, icon_dst)
-
-        create_desktop_file('other-apps', 'Other Apps', other_apps_exec, other_apps_icon, 'Utility', 'Flick')
-        count += 1
-        print(f"  Synced: Other Apps (folder)")
+    # Install Flick icon pack
+    install_icons_script = FLICK_PHOSH_DIR / 'scripts/install-icons'
+    if install_icons_script.exists():
+        import subprocess
+        print("\nInstalling Flick icon pack...")
+        subprocess.run([str(install_icons_script)], capture_output=True)
+        print("  Icon pack installed")
 
     print(f"\nSynced {count} Flick apps to phosh")
+    print("Run 'phosh-icon-manager apply-curation' to set up the Other Apps folder.")
 
 
 def get_curated_other_apps():

@@ -34,23 +34,20 @@ flick-phosh/
 ## Installation
 
 ```bash
-# Clone the repo
-git clone https://github.com/user/flick-phosh
+# Clone the repo with submodules
+git clone --recursive https://github.com/ruapotato/flick-phosh
 cd flick-phosh
 
-# Sync Flick apps to phosh (creates .desktop files and installs icons)
-./scripts/phosh-icon-manager sync
-
-# Set up the Other Apps folder with native phosh apps
-./scripts/phosh-icon-manager curate org.gnome.Calls org.gnome.Contacts sm.puri.Chatty
-./scripts/phosh-icon-manager curate firefox org.gnome.Console org.gnome.Geary
-
-# Apply curation (creates phosh folder, hides clutter)
-./scripts/phosh-icon-manager apply-curation
-
-# Refresh phosh
-./scripts/phosh-icon-manager refresh
+# Run the installer (does everything)
+./install.sh
 ```
+
+The installer will:
+1. Apply patches to Flick apps for phosh compatibility
+2. Install Flick icon pack
+3. Create .desktop files for all Flick apps
+4. Set up the "Other Apps" folder with native phosh apps
+5. Configure proper UI scaling
 
 ## Commands
 
@@ -137,6 +134,29 @@ App state is stored in `~/.local/state/flick-phosh/`:
 - Phosh shell
 - Qt5 with QML support (`qmlscene`)
 - Python 3
+
+## Roadmap
+
+### Planned Improvements
+
+- **Responsive UI**: Convert all apps to use proportional sizing instead of hardcoded pixels
+- **MPRIS Media Controls**: Music/Audiobooks/Recorder integration with phosh media controls
+- **Phosh Integration**:
+  - Read accent color from phosh/GNOME settings
+  - Use GeoClue for Weather location
+  - Proper notifications via D-Bus
+- **Flick Library**: Central QML library for apps with:
+  - Theme management (accent colors, dark/light mode)
+  - Media player controls
+  - Notification helpers
+  - Responsive layout utilities
+- **AI-Friendly Design**: Modular app structure for easy AI-assisted development
+
+### Known Issues
+
+- Some apps have oversized UI on certain screen resolutions
+- Weather requires manual location configuration
+- Media apps don't show playback controls in phosh
 
 ## License
 

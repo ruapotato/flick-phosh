@@ -23,7 +23,7 @@ export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
 
 # Scale factor for phosh (adjust for proper UI size)
 # Phosh typically runs at scale 2, Flick apps were designed for different scaling
-export QT_SCALE_FACTOR=0.8
+export QT_SCALE_FACTOR=0.6
 export QT_AUTO_SCREEN_SCALE_FACTOR=0
 
 # Find the QML entry point
