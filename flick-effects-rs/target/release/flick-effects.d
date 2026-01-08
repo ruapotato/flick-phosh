@@ -1,0 +1,1 @@
+/home/furios/flick-phosh/flick-effects-rs/target/release/flick-effects: /home/furios/flick-phosh/flick-effects-rs/src/capture.rs /home/furios/flick-phosh/flick-effects-rs/src/config.rs /home/furios/flick-phosh/flick-effects-rs/src/main.rs /home/furios/flick-phosh/flick-effects-rs/src/touch.rs
