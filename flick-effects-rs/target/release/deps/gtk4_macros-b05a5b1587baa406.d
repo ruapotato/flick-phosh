@@ -1,9 +1,0 @@
-/home/furios/flick-phosh/flick-effects-rs/target/release/deps/gtk4_macros-b05a5b1587baa406.d: /home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/lib.rs /home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/attribute_parser.rs /home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/composite_template_derive.rs /home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/template_callbacks_attribute.rs /home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/util.rs
-
-/home/furios/flick-phosh/flick-effects-rs/target/release/deps/libgtk4_macros-b05a5b1587baa406.so: /home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/lib.rs /home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/attribute_parser.rs /home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/composite_template_derive.rs /home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/template_callbacks_attribute.rs /home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/util.rs
-
-/home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/lib.rs:
-/home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/attribute_parser.rs:
-/home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/composite_template_derive.rs:
-/home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/template_callbacks_attribute.rs:
-/home/furios/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.7.2/src/util.rs:
