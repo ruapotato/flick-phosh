@@ -72,9 +72,11 @@ process_qml_output() {
             json="${line#*SAVE_EFFECTS:}"
             echo "$json" > "${EFFECTS_STATE_DIR}/effects_config.json"
             echo "Saved effects config" >> "$LOG_FILE"
-            # Restart effects service to apply changes immediately
-            systemctl --user restart flick-effects 2>/dev/null &
-            echo "Restarted flick-effects service" >> "$LOG_FILE"
+            # Restart effects to apply changes - kill and restart
+            pkill -f flick-effects 2>/dev/null
+            sleep 0.5
+            "${HOME}/.local/bin/flick-effects" &
+            echo "Restarted flick-effects" >> "$LOG_FILE"
         elif [[ "$line" == *"SAVE_THEME:"* ]]; then
             json="${line#*SAVE_THEME:}"
             # Merge with existing display config

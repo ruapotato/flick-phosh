@@ -40,4 +40,4 @@ if [ -z "$QML_FILE" ]; then
 fi
 
 # Launch with qmlscene
-exec qmlscene "$QML_FILE" 2>> "$LOG_FILE"
+exec /usr/lib/qt5/bin/qmlscene "$QML_FILE" 2>> "$LOG_FILE"
