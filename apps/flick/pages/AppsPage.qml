@@ -14,6 +14,8 @@ Page {
     Component.onCompleted: {
         loadExcludedApps()
         scanAllApps()
+        // Sync other apps list on load
+        updateOtherApps()
     }
 
     function loadExcludedApps() {
