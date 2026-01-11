@@ -62,6 +62,11 @@ process_qml_output() {
             json="${line#*SAVE_OTHER_APPS:}"
             echo "$json" > "${STATE_DIR}/curated_other_apps.json"
             echo "Saved other apps" >> "$LOG_FILE"
+            # Update phosh dconf folder - convert JSON array to dconf format
+            # ["app1","app2"] -> ['app1.desktop', 'app2.desktop']
+            dconf_apps=$(python3 -c "import json; apps=json.loads('$json'); print('[' + ', '.join([\"'\" + a + \".desktop'\" for a in apps]) + ']')")
+            dconf write /org/gnome/desktop/app-folders/folders/d6b319c0-2f3e-4200-9d7c-c72a17431b53/apps "$dconf_apps" 2>/dev/null
+            echo "Updated phosh Other Apps folder: $dconf_apps" >> "$LOG_FILE"
         elif [[ "$line" == *"SAVE_EFFECTS:"* ]]; then
             json="${line#*SAVE_EFFECTS:}"
             echo "$json" > "${EFFECTS_STATE_DIR}/effects_config.json"
