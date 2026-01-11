@@ -5,12 +5,13 @@ import QtQuick.Layouts 1.15
 Page {
     id: effectsPage
 
-    property bool fireTouchEnabled: true
+    property bool fireTouchEnabled: false
     property bool livingPixelsEnabled: false
-    property bool lpStars: true
-    property bool lpShootingStars: true
-    property bool lpFireflies: true
+    property bool lpStars: false
+    property bool lpShootingStars: false
+    property bool lpFireflies: false
     property string configPath: root.stateDir + "/effects_config.json"
+    property bool configLoaded: false
 
     Component.onCompleted: loadConfig()
 
@@ -19,15 +20,18 @@ Page {
         xhr.open("GET", "file://" + configPath, false)
         try {
             xhr.send()
-            if (xhr.status === 200) {
+            if (xhr.status === 200 || xhr.status === 0) {
                 var config = JSON.parse(xhr.responseText)
                 if (config.fire_touch_enabled !== undefined) fireTouchEnabled = config.fire_touch_enabled
                 if (config.living_pixels_enabled !== undefined) livingPixelsEnabled = config.living_pixels_enabled
                 if (config.lp_stars !== undefined) lpStars = config.lp_stars
                 if (config.lp_shooting_stars !== undefined) lpShootingStars = config.lp_shooting_stars
                 if (config.lp_fireflies !== undefined) lpFireflies = config.lp_fireflies
+                configLoaded = true
             }
-        } catch (e) {}
+        } catch (e) {
+            console.log("Effects config load error: " + e)
+        }
     }
 
     function saveConfig() {
