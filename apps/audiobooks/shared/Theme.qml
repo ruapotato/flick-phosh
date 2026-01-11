@@ -1,52 +1,64 @@
 pragma Singleton
 import QtQuick 2.15
+import FlickBackend 1.0
 
 QtObject {
     id: theme
 
-    // Default accent color (pink/red)
-    property color accentColor: "#e94560"
+    // Accent color from config
+    property color accentColor: Scaling.accentColor
     property color accentPressed: Qt.darker(accentColor, 1.2)
 
-    // Dynamic state directory detection
-    readonly property string stateDir: {
-        var paths = [
-            "/home/furios/.local/state/flick",
-            "/home/droidian/.local/state/flick"
-        ]
-        for (var i = 0; i < paths.length; i++) {
-            var xhr = new XMLHttpRequest()
-            xhr.open("HEAD", "file://" + paths[i] + "/display_config.json", false)
-            try {
-                xhr.send()
-                if (xhr.status === 200 || xhr.status === 0) {
-                    return paths[i]
-                }
-            } catch (e) {}
-        }
-        return "/home/furios/.local/state/flick"
-    }
+    // Use Scaling singleton for all scaled values
+    readonly property real uiScale: Scaling.scaleFactor
+    readonly property real textScale: Scaling.textScale
 
-    // Derived paths
+    // Scaled font sizes
+    readonly property int fontTiny: Scaling.fontTiny
+    readonly property int fontSmall: Scaling.fontSmall
+    readonly property int fontNormal: Scaling.fontNormal
+    readonly property int fontMedium: Scaling.fontMedium
+    readonly property int fontLarge: Scaling.fontLarge
+    readonly property int fontXLarge: Scaling.fontXLarge
+    readonly property int fontXXLarge: Scaling.fontXXLarge
+    readonly property int fontHuge: Scaling.fontHuge
+
+    // Scaled spacing
+    readonly property int spacingTiny: Scaling.spacingTiny
+    readonly property int spacingSmall: Scaling.spacingSmall
+    readonly property int spacingNormal: Scaling.spacingNormal
+    readonly property int spacingLarge: Scaling.spacingLarge
+    readonly property int spacingXLarge: Scaling.spacingXLarge
+
+    // Scaled sizes
+    readonly property int iconSmall: Scaling.iconSmall
+    readonly property int iconNormal: Scaling.iconNormal
+    readonly property int iconLarge: Scaling.iconLarge
+    readonly property int iconXLarge: Scaling.iconXLarge
+
+    readonly property int buttonHeight: Scaling.buttonHeight
+    readonly property int buttonHeightSmall: Scaling.buttonHeightSmall
+    readonly property int listItemHeight: Scaling.listItemHeight
+    readonly property int headerHeight: Scaling.headerHeight
+
+    // State directory and paths from Scaling
+    readonly property string stateDir: Scaling.stateDir
     readonly property string configPath: stateDir + "/display_config.json"
-    readonly property string homeDir: stateDir.replace("/.local/state/flick", "")
+    readonly property string homeDir: Scaling.homeDir
 
-    // Load accent color from config
-    function loadConfig() {
-        var xhr = new XMLHttpRequest()
-        xhr.open("GET", "file://" + configPath, false)
-        try {
-            xhr.send()
-            if (xhr.status === 200 || xhr.status === 0) {
-                var config = JSON.parse(xhr.responseText)
-                if (config.accent_color && config.accent_color !== "") {
-                    accentColor = config.accent_color
-                }
-            }
-        } catch (e) {
-            console.log("Could not load theme config, using defaults")
-        }
+    // Helper functions
+    function sp(pixels) { return Scaling.sp(pixels) }
+    function tp(pixels) { return Scaling.tp(pixels) }
+    function wp(percent) { return Scaling.wp(percent) }
+    function hp(percent) { return Scaling.hp(percent) }
+
+    // Initialize with screen size
+    function init(width, height) {
+        Scaling.init(width, height)
     }
 
-    Component.onCompleted: loadConfig()
+    // Legacy load config function (now handled by Scaling)
+    function loadConfig() {
+        Scaling.loadConfig()
+    }
 }
