@@ -1,0 +1,15 @@
+[Unit]
+Description=Pholish MPRIS Bridge for phosh media controls
+After=dbus.socket
+Wants=dbus.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/furios/pholish/services/mpris-bridge/pholish-mpris.py
+Restart=on-failure
+RestartSec=5
+Environment=DISPLAY=:0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/32011/bus
+
+[Install]
+WantedBy=default.target

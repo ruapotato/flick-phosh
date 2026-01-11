@@ -5,8 +5,8 @@ SCRIPT_DIR="$(dirname "$0")"
 QML_FILE="${SCRIPT_DIR}/main.qml"
 LOG_FILE="${HOME}/.local/state/flick/distract.log"
 
-# FlickBackend library path
-FLICK_LIB_DIR="${SCRIPT_DIR}/../../Flick/lib"
+# PholishBackend library path
+PHOLISH_LIB_DIR="/home/furios/pholish/lib"
 
 mkdir -p "${HOME}/.local/state/flick"
 
@@ -20,8 +20,8 @@ export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
 export QT_WAYLAND_CLIENT_BUFFER_INTEGRATION=wayland-egl
 export QT_AUTO_SCREEN_SCALE_FACTOR=0
 
-# Add FlickBackend library to QML import path
-export QML2_IMPORT_PATH="${FLICK_LIB_DIR}:${QML2_IMPORT_PATH}"
+# Add PholishBackend library to QML import path
+export QML2_IMPORT_PATH="${PHOLISH_LIB_DIR}:${QML2_IMPORT_PATH}"
 
 DISPLAY_CONFIG="${HOME}/.local/state/flick/display_config.json"
 TEXT_SCALE="1.0"

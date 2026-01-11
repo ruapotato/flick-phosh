@@ -1,6 +1,6 @@
 pragma Singleton
 import QtQuick 2.15
-import FlickBackend 1.0 as Backend
+import PholishBackend 1.0 as Backend
 
 QtObject {
     // Proxy all functions to the backend Haptic singleton

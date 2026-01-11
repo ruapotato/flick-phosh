@@ -1,213 +1,202 @@
-# Flick-Phosh
+# Pholish
 
-Flick userland apps running on Phosh - unifying mobile Linux with beautiful, consistent apps.
+**Polish for Phosh** - A collection of tools, tweaks, and beautiful apps to refine the phosh mobile experience.
 
-## Overview
+## What is Pholish?
 
-This project ports the Flick app ecosystem to work with Phosh instead of the custom Flick shell. It provides:
+Pholish brings a polished, cohesive experience to phosh (the GNOME phone shell). It combines:
 
-- **16 Flick Apps**: Calculator, Calendar, Clock, Files, Maps, Music, Notes, Photos, Store, Video, Weather, and more
-- **Phosh Native Integration**: Uses native phosh apps for Phone (Calls), Messages (Chatty), Contacts, Terminal (Console), Email (Geary), and Browser (Firefox)
-- **App Folder System**: Non-Flick apps organized into an "Other Apps" folder using native phosh folders
-- **Flick Store**: Install apps from 255.one app store
+- **Beautiful Apps** - Themed, touch-friendly applications with consistent design
+- **Phosh Tweaks** - Visual enhancements like touch effects and animations
+- **MPRIS Integration** - Media controls on lockscreen and dropdown
+- **Unified Backend** - Shared components for scaling, haptics, and theming
 
-## Structure
+## Features
 
-```
-flick-phosh/
-├── Flick/                  # Cloned Flick repo (apps, icons, store backend)
-│   ├── apps/               # QML applications
-│   ├── icons/              # App icons
-│   ├── flick_forge/        # Store backend (submodule)
-│   └── flick-pkg           # Package manager
-├── scripts/
-│   ├── phosh-icon-manager  # Manage phosh app visibility and folders
-│   ├── flick-pkg           # Package manager (adapted for phosh)
-│   └── flick-app-launcher  # QML app launcher with proper environment
-├── apps/
-│   └── other-apps/         # Other Apps folder (legacy QML version)
-└── icons/
-    ├── flick/              # Custom icons
-    └── other-apps/         # Icons for curated apps
-```
+### Apps
+| App | Description |
+|-----|-------------|
+| Music | Clean, elegant music player |
+| Audiobooks | Audiobook player with position memory |
+| Calculator | Beautiful calculator with history |
+| Distract | Focus timer for productivity |
+| Weather | Location-based weather |
+| Notes | Quick note-taking |
+| Photos | Gallery viewer |
+| And more... | 16+ polished apps |
+
+### Phosh Integration
+- **MPRIS Media Controls** - Control music/audiobooks from phosh lockscreen and dropdown
+- **Haptic Feedback** - Touch feedback throughout the UI
+- **Adaptive Scaling** - UI scales properly across different screen sizes
+
+### Visual Polish
+- Consistent accent colors across all apps
+- Smooth animations and transitions
+- Touch-optimized controls
+- Dark theme throughout
+
+### Touch Effects
+- **Water ripples** - Concentric rings on touch
+- **Snow/Frost** - Snowflake patterns
+- **CRT** - Retro scanline effect
+- **Living Pixels** - Stars, fireflies, dust particles
 
 ## Installation
 
 ```bash
-# Clone the repo with submodules
-git clone --recursive https://github.com/ruapotato/flick-phosh
-cd flick-phosh
+# Clone the repository
+git clone --recursive https://github.com/ruapotato/pholish.git
+cd pholish
 
-# Run the installer (does everything)
+# Run the installer
 ./install.sh
 ```
 
-The installer will:
-1. Apply patches to Flick apps for phosh compatibility
-2. Install Flick icon pack
-3. Create .desktop files for all Flick apps
-4. Set up the "Other Apps" folder with native phosh apps
-5. Configure proper UI scaling
+### Enable MPRIS Media Controls
+
+To get media controls in phosh's lockscreen and notification dropdown:
+
+```bash
+# Install dependencies
+sudo apt install python3-gi python3-dbus gir1.2-glib-2.0
+
+# Copy and enable the systemd service
+mkdir -p ~/.config/systemd/user
+cp services/mpris-bridge/pholish-mpris.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable pholish-mpris
+systemctl --user start pholish-mpris
+```
+
+Now when you play music or audiobooks, controls will appear on phosh's lockscreen!
+
+## Directory Structure
+
+```
+pholish/
+├── apps/                    # Pholish themed apps
+│   ├── music/              # Music player
+│   ├── audiobooks/         # Audiobook player
+│   ├── distract/           # Focus timer
+│   └── flick/              # App launcher/settings
+├── lib/                    # PholishBackend QML library
+│   └── PholishBackend/     # Scaling, Haptic, MediaController
+├── services/               # Background services
+│   └── mpris-bridge/       # MPRIS daemon for phosh
+├── tweaks/                 # Phosh enhancements
+│   ├── effects/            # Touch effects
+│   └── config/             # Configuration
+├── themes/                 # Icons, wallpapers
+├── scripts/                # Helper scripts
+└── Flick/                  # Core components (submodule)
+```
+
+## PholishBackend Library
+
+Apps use the shared PholishBackend QML library:
+
+```qml
+import PholishBackend 1.0
+
+// Proportional scaling - UI adapts to screen size
+width: Scaling.sp(100)
+font.pixelSize: Scaling.fontLarge
+spacing: Scaling.spacingNormal
+
+// Haptic feedback
+Haptic.tap()     // Light tap for selections
+Haptic.click()   // Medium click for toggles
+Haptic.heavy()   // Strong for important actions
+Haptic.success() // Double tap for success
+Haptic.error()   // Long buzz for errors
+
+// Media controls (for player apps)
+MediaController.reportStatus({
+    title: "Song Name",
+    artist: "Artist",
+    app: "music",
+    playing: true,
+    position: 120000,
+    duration: 300000
+})
+```
+
+## Configuration
+
+Settings are stored in `~/.local/state/flick/`:
+
+| File | Purpose |
+|------|---------|
+| `display_config.json` | Theme (accent color, text scale) |
+| `media_status.json` | Current media playback |
+| `effects_config.json` | Touch effects settings |
+
+### Display Config Example
+```json
+{
+    "accent_color": "#e94560",
+    "text_scale": 1.0,
+    "wallpaper": "/path/to/wallpaper.png"
+}
+```
+
+### Effects Config Example
+```json
+{
+    "touch_effect_style": 0,
+    "ripple_size": 0.30,
+    "ripple_duration": 0.5,
+    "living_pixels": false,
+    "lp_stars": true,
+    "lp_fireflies": true
+}
+```
 
 ## Commands
 
-### phosh-icon-manager
-
+### App Management
 ```bash
-# Sync Flick apps to phosh
+# Sync apps to phosh
 ./scripts/phosh-icon-manager sync
 
 # List apps
-./scripts/phosh-icon-manager list        # Show Flick + curated apps
-./scripts/phosh-icon-manager list --all  # Show all apps including system
+./scripts/phosh-icon-manager list
 
-# Manage "Other Apps" folder
-./scripts/phosh-icon-manager curate <app_id>    # Add app to folder
-./scripts/phosh-icon-manager uncurate <app_id>  # Remove from folder
-
-# Apply changes
-./scripts/phosh-icon-manager apply-curation  # Create folder, hide clutter
-./scripts/phosh-icon-manager refresh         # Update phosh app database
-
-# Hide/show specific apps
+# Hide/show apps
 ./scripts/phosh-icon-manager hide <app_id>
 ./scripts/phosh-icon-manager show <app_id>
 ```
 
-### flick-pkg (Package Manager)
-
+### Effects
 ```bash
-# List available packages
-./scripts/flick-pkg list
-
-# Search packages
-./scripts/flick-pkg search <query>
-
-# Install/uninstall
-./scripts/flick-pkg install <app_id>
-./scripts/flick-pkg uninstall <app_id>
-
-# Show installed apps
-./scripts/flick-pkg installed
-```
-
-## App Layout
-
-### Main Grid (Flick Apps)
-- Calculator, Calendar, Clock
-- Distract, Files, Lap Track
-- Maps, Music, Notes
-- Photos, Store, Video
-- Voice Recorder, Weather
-- Flick Audiobooks, Flick Ebooks
-
-### Other Apps Folder (Native Phosh)
-- Calls (GNOME Calls)
-- Contacts (GNOME Contacts)
-- Chats (Chatty)
-- Console (GNOME Console/Terminal)
-- Email (Geary)
-- Firefox
-
-## Phosh Native Apps Used
-
-Instead of porting these Flick apps, we use phosh's native equivalents:
-
-| Function | Phosh App | App ID |
-|----------|-----------|--------|
-| Phone | GNOME Calls | org.gnome.Calls |
-| Messages | Chatty | sm.puri.Chatty |
-| Contacts | GNOME Contacts | org.gnome.Contacts |
-| Terminal | Console | org.gnome.Console |
-| Email | Geary | org.gnome.Geary |
-| Browser | Firefox | firefox |
-
-## Configuration
-
-App state is stored in `~/.local/state/flick-phosh/`:
-- `curated_other_apps.json` - Apps in the "Other Apps" folder
-- `hidden_apps.json` - Manually hidden apps
-- `folders/` - Folder configuration
-
-## Flick Effects Overlay
-
-The Flick Effects overlay adds visual effects on top of phosh:
-
-### Touch Effects
-- **Water ripples** - Blue concentric rings on touch release
-- **Snow** - Snowflake patterns
-- **CRT** - Retro scanline effect
-- **Terminal** - ASCII character rings
-
-### Living Pixels
-- **Stars** - Twinkling stars in the sky
-- **Shooting stars** - Occasional meteors with trails
-- **Fireflies** - Glowing particles that drift
-- **Dust** - Floating dust motes
-- **Shimmer** - Sparkling points
-
-### Managing Effects
-
-```bash
-# Enable effects on startup
+# Enable effects service
 systemctl --user enable flick-effects
-
-# Start/stop effects
 systemctl --user start flick-effects
-systemctl --user stop flick-effects
-
-# Edit configuration
-nano ~/.local/state/flick/effects_config.json
-```
-
-### Configuration Options
-
-Edit `~/.local/state/flick/effects_config.json`:
-
-```json
-{
-    "touch_effect_style": 0,    // 0=water, 1=snow, 2=crt, 3=terminal
-    "ripple_size": 0.30,        // Size relative to screen
-    "ripple_duration": 0.5,     // Seconds
-    "living_pixels": false,     // Enable/disable all living pixels
-    "lp_stars": true,
-    "lp_shooting_stars": true,
-    "lp_fireflies": true,
-    "lp_dust": true,
-    "lp_shimmer": true
-}
 ```
 
 ## Requirements
 
-- Phosh shell
-- Qt5 with QML support (`qmlscene`)
-- Python 3
-- GTK Layer Shell (`libgtk-layer-shell-dev`)
+- Phosh shell (Droidian, Mobian, postmarketOS, etc.)
+- Qt5 with QML support
+- Python 3 with gi and dbus modules
+- PulseAudio or PipeWire
 
-## Roadmap
+## Contributing
 
-### Planned Improvements
+Contributions welcome! Areas to help:
 
-- **Responsive UI**: Convert all apps to use proportional sizing instead of hardcoded pixels
-- **MPRIS Media Controls**: Music/Audiobooks/Recorder integration with phosh media controls
-- **Phosh Integration**:
-  - Read accent color from phosh/GNOME settings
-  - Use GeoClue for Weather location
-  - Proper notifications via D-Bus
-- **Flick Library**: Central QML library for apps with:
-  - Theme management (accent colors, dark/light mode)
-  - Media player controls
-  - Notification helpers
-  - Responsive layout utilities
-- **AI-Friendly Design**: Modular app structure for easy AI-assisted development
-
-### Known Issues
-
-- Some apps have oversized UI on certain screen resolutions
-- Weather requires manual location configuration
-- Media apps don't show playback controls in phosh
+- New polished apps
+- Phosh tweaks and enhancements
+- Bug fixes and improvements
+- Documentation
+- Translations
 
 ## License
 
-GPL-3.0 (same as original Flick project)
+GPL-3.0 - See LICENSE file for details.
+
+## Credits
+
+- Built for [phosh](https://gitlab.gnome.org/World/Phosh/phosh)
+- Evolved from the [Flick](https://github.com/ruapotato/Flick) project

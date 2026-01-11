@@ -1,6 +1,6 @@
 pragma Singleton
 import QtQuick 2.15
-import FlickBackend 1.0
+import PholishBackend 1.0
 
 QtObject {
     id: theme
