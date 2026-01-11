@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""
+Scan all installed applications and output JSON for Flick-Phosh settings.
+Discovers all .desktop files from system and user directories.
+"""
+
+import os
+import json
+import sys
+from pathlib import Path
+from configparser import ConfigParser
+
+# Directories to scan
+SYSTEM_APPS_DIR = Path('/usr/share/applications')
+USER_HOME = Path(os.environ.get('HOME', '/home/furios'))
+USER_APPS_DIR = USER_HOME / '.local/share/applications'
+STATE_DIR = USER_HOME / '.local/state/flick-phosh'
+OUTPUT_FILE = STATE_DIR / 'discovered_apps.json'
+
+
+def parse_desktop_file(path, ignore_flick_hidden=False):
+    """Parse a .desktop file and return app info dict.
+
+    Args:
+        path: Path to .desktop file
+        ignore_flick_hidden: If True, include apps that have X-Flick-Hidden=true
+                            (these were hidden by us, not originally hidden)
+    """
+    try:
+        with open(path, 'r', errors='ignore') as f:
+            content = f.read()
+
+        # Simple parsing (configparser doesn't handle .desktop files well)
+        name = ''
+        icon = 'application-x-executable'
+        exec_cmd = ''
+        no_display = False
+        hidden = False
+        categories = ''
+        app_type = ''
+        flick_hidden = False
+
+        in_desktop_entry = False
+        for line in content.split('\n'):
+            line = line.strip()
+            if line == '[Desktop Entry]':
+                in_desktop_entry = True
+                continue
+            elif line.startswith('[') and line.endswith(']'):
+                in_desktop_entry = False
+                continue
+
+            if in_desktop_entry and '=' in line:
+                key, value = line.split('=', 1)
+                key = key.strip().lower()  # Normalize to lowercase
+                value = value.strip()
+
+                if key == 'name' and not name:
+                    name = value
+                elif key == 'icon':
+                    icon = value
+                elif key == 'exec' and not exec_cmd:
+                    exec_cmd = value
+                elif key == 'nodisplay':
+                    no_display = value.lower() == 'true'
+                elif key == 'hidden':
+                    hidden = value.lower() == 'true'
+                elif key == 'categories':
+                    categories = value
+                elif key == 'type':
+                    app_type = value
+                elif key == 'x-flick-hidden':
+                    flick_hidden = value.lower() == 'true'
+
+        # Skip if no name or not an Application
+        if not name:
+            return None
+        if app_type and app_type != 'Application':
+            return None
+
+        # If this app has X-Flick-Hidden, it means WE hid it (not originally hidden)
+        # So we should still include it in our app list
+        if flick_hidden and ignore_flick_hidden:
+            pass  # Include the app
+        elif no_display or hidden:
+            return None
+
+        # Skip GNOME control center panels
+        if 'X-GNOME-Settings-Panel' in categories:
+            return None
+
+        return {
+            'name': name,
+            'icon': icon,
+            'exec': exec_cmd,
+            'categories': categories
+        }
+    except Exception as e:
+        return None
+
+
+def scan_apps():
+    """Scan all .desktop files and return list of apps."""
+    apps = {}
+
+    # Scan system apps first
+    if SYSTEM_APPS_DIR.exists():
+        for desktop_file in SYSTEM_APPS_DIR.glob('*.desktop'):
+            app_id = desktop_file.stem
+            # Skip Flick apps - they're managed separately
+            if app_id.startswith('flick-'):
+                continue
+            info = parse_desktop_file(desktop_file)
+            if info:
+                apps[app_id] = info
+                apps[app_id]['id'] = app_id
+                apps[app_id]['source'] = 'system'
+
+    # Scan user apps (can override system)
+    # Use ignore_flick_hidden=True so apps we hid ourselves still appear
+    if USER_APPS_DIR.exists():
+        for desktop_file in USER_APPS_DIR.glob('*.desktop'):
+            app_id = desktop_file.stem
+            # Skip Flick apps - they're managed separately
+            if app_id.startswith('flick-'):
+                continue
+            info = parse_desktop_file(desktop_file, ignore_flick_hidden=True)
+            if info:
+                apps[app_id] = info
+                apps[app_id]['id'] = app_id
+                apps[app_id]['source'] = 'user'
+            else:
+                # User override with NoDisplay (not X-Flick-Hidden) - check if we should remove
+                # Check if it's actually hidden by flick or genuinely NoDisplay
+                with open(desktop_file, 'r', errors='ignore') as f:
+                    content = f.read().lower()
+                if 'x-flick-hidden' not in content and app_id in apps:
+                    # Not flick-hidden, genuinely NoDisplay - remove from list
+                    del apps[app_id]
+
+    # Convert to sorted list
+    app_list = sorted(apps.values(), key=lambda x: x['name'].lower())
+    return app_list
+
+
+def main():
+    # Ensure state directory exists
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Scan apps
+    apps = scan_apps()
+
+    # Write output
+    with open(OUTPUT_FILE, 'w') as f:
+        json.dump(apps, f, indent=2)
+
+    print(f"Discovered {len(apps)} apps, saved to {OUTPUT_FILE}")
+
+    # Also output to stdout if requested
+    if '--stdout' in sys.argv:
+        print(json.dumps(apps, indent=2))
+
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

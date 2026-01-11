@@ -46,10 +46,10 @@ ApplicationWindow {
                 }
             } catch (e) {
                 console.log("Error parsing config: " + e)
-                showError("No apps configured.\nUse: phosh-icon-manager curate <app_id>")
+                showError("No apps configured.\nUse Settings > Apps to manage.")
             }
         } else {
-            showError("No apps configured.\nUse: phosh-icon-manager curate <app_id>")
+            showError("No apps configured.\nUse Settings > Apps to manage.")
         }
     }
 
@@ -78,12 +78,22 @@ ApplicationWindow {
 
                 for (var j = 0; j < lines.length; j++) {
                     var line = lines[j].trim()
-                    if (line.indexOf("Name=") === 0 && name === appId) {
-                        name = line.substring(5)
-                    } else if (line.indexOf("Icon=") === 0) {
-                        icon = line.substring(5)
-                    } else if (line.indexOf("Exec=") === 0 && !exec) {
-                        exec = line.substring(5).replace(/%[uUfF]/g, "").trim()
+                    var lineLower = line.toLowerCase()
+                    if (lineLower.indexOf("name=") === 0 || lineLower.indexOf("name =") === 0) {
+                        var eqIdx = line.indexOf("=")
+                        if (eqIdx > 0 && name === appId) {
+                            name = line.substring(eqIdx + 1).trim()
+                        }
+                    } else if (lineLower.indexOf("icon=") === 0 || lineLower.indexOf("icon =") === 0) {
+                        var eqIdx2 = line.indexOf("=")
+                        if (eqIdx2 > 0) {
+                            icon = line.substring(eqIdx2 + 1).trim()
+                        }
+                    } else if ((lineLower.indexOf("exec=") === 0 || lineLower.indexOf("exec =") === 0) && !exec) {
+                        var eqIdx3 = line.indexOf("=")
+                        if (eqIdx3 > 0) {
+                            exec = line.substring(eqIdx3 + 1).trim().replace(/%[uUfF]/g, "").trim()
+                        }
                     }
                 }
 
