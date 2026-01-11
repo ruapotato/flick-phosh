@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Audiobooks
+Comment=Listen to audiobooks
+Exec=/home/furios/flick-phosh/apps/audiobooks/run_audiobooks.sh
+Icon=audio-x-generic
+Categories=AudioVideo;Audio;
+Terminal=false

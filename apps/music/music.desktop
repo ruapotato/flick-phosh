@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Music
+Comment=Play your music
+Exec=/home/furios/flick-phosh/apps/music/run_music.sh
+Icon=audio-x-generic
+Categories=AudioVideo;Audio;Player;
+Terminal=false

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Flick
+Comment=Flick Control Center
+Exec=/home/furios/flick-phosh/apps/flick/run_flick.sh
+Icon=preferences-system
+Categories=Settings;System;
+Terminal=false

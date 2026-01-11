@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Distract
+Comment=Focus timer and productivity
+Exec=/home/furios/flick-phosh/apps/distract/run_distract.sh
+Icon=preferences-system-time
+Categories=Utility;
+Terminal=false
